@@ -23,9 +23,8 @@ import {
   fetchAllStepLogs, 
   deleteUserLog, 
   createUserOrUpdateProfile,
-  db 
-} from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+  updateUserTickets 
+} from '../sheetsBackend';
 import { DepartmentInfo, ActiveUser } from '../types';
 
 interface AdminPortalViewProps {
@@ -50,9 +49,10 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [newEmpId, setNewEmpId] = useState('');
   const [newEmpName, setNewEmpName] = useState('');
+  const [newEmpSurname, setNewEmpSurname] = useState('');
   const [newEmpNickname, setNewEmpNickname] = useState('');
   const [newEmpDept, setNewEmpDept] = useState(departments[0]?.id || 'ceo');
-  const [newEmpPassword, setNewEmpPassword] = useState('');
+  const [newEmpBirthDate, setNewEmpBirthDate] = useState('');
   const [newEmpError, setNewEmpError] = useState('');
   const [isSavingUser, setIsSavingUser] = useState(false);
 
@@ -105,7 +105,12 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
     }
 
     if (!newEmpName.trim()) {
-      setNewEmpError('กรุณากรอกชื่อ-นามสกุลจริง');
+      setNewEmpError('กรุณากรอกชื่อจริง');
+      return;
+    }
+
+    if (!newEmpSurname.trim()) {
+      setNewEmpError('กรุณากรอกนามสกุลจริง');
       return;
     }
 
@@ -114,9 +119,8 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
       return;
     }
 
-    const formattedPassword = newEmpPassword.trim();
-    if (formattedPassword.length !== 6 || !/^\d+$/.test(formattedPassword)) {
-      setNewEmpError('กรุณาระบุรหัสผ่านเข้าสู่ระบบเป็นตัวเลข 6 หลัก (แนะนำใช้วันเกิด เช่น 150538)');
+    if (!newEmpBirthDate) {
+      setNewEmpError('กรุณาระบุวันเกิด เพื่อให้ระบบคำนวณอายุและสร้างรหัสผ่านวันเกิดอัตโนมัติ');
       return;
     }
 
@@ -125,24 +129,27 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
       const newUserObj: ActiveUser = {
         employeeId: formattedId,
         email: `${formattedId}@thairathgroup.com`,
-        name: `คุณ${newEmpName.trim()} (${newEmpNickname.trim()})`,
+        name: newEmpName.trim(),
+        surname: newEmpSurname.trim(),
         nickname: newEmpNickname.trim(),
         departmentId: newEmpDept,
         weekTarget: 60000,
         totalTickets: 2, // starting free tickets
+        dateOfBirth: newEmpBirthDate
       };
 
-      await createUserOrUpdateProfile(formattedId, newUserObj, formattedPassword);
+      await createUserOrUpdateProfile(formattedId, newUserObj);
       
       // Reset & load again
       setNewEmpId('');
       setNewEmpName('');
+      setNewEmpSurname('');
       setNewEmpNickname('');
-      setNewEmpPassword('');
+      setNewEmpBirthDate('');
       setShowAddUserModal(false);
       await loadAdminData();
     } catch (err: any) {
-      setNewEmpError('เกิดปัญหากับระบบคลาวด์: ' + err.message);
+      setNewEmpError('เกิดปัญหากับระบบ Google Sheets: ' + err.message);
     } finally {
       setIsSavingUser(false);
     }
@@ -153,11 +160,8 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
     if (!adjustingUser) return;
     setIsUpdatingTickets(true);
     try {
-      const userRef = doc(db, 'users', adjustingUser.id);
       const newTicketCount = Math.max(0, adjustingUser.totalTickets + ticketDelta);
-      await updateDoc(userRef, {
-        totalTickets: newTicketCount
-      });
+      await updateUserTickets(adjustingUser.employeeId || adjustingUser.id, newTicketCount);
       
       // Update local state
       setUsers(prev => prev.map(u => u.id === adjustingUser.id ? { ...u, totalTickets: newTicketCount } : u));
@@ -179,7 +183,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
       users.forEach(u => {
         const dept = departments.find(d => d.id === u.departmentId);
         const deptName = dept ? dept.nameTh : 'ไม่ระบุ';
-        const cleanName = (u.name || '').replace(/,/g, ' ');
+        const cleanName = ([u.name, u.surname || u.Surename].filter(Boolean).join(' ') || '').replace(/,/g, ' ');
         const cleanNickname = (u.nickname || '').replace(/,/g, ' ');
         csvContent += `${u.employeeId || ''},${cleanName},${cleanNickname},${deptName},${u.password || ''},${u.totalTickets || 0}\n`;
       });
@@ -312,7 +316,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
             <div>
               <p className="text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">จำนวนพนักงานที่จดทะเบียน</p>
               <h2 className="text-3xl font-black text-black mt-2 font-mono">{totalEmployees} <span className="text-xs text-slate-500 font-semibold font-sans">คน</span></h2>
-              <p className="text-[10px] text-emerald-600 font-medium mt-1">● บูตแลบ Firestore เรียบร้อย</p>
+              <p className="text-[10px] text-emerald-600 font-medium mt-1">● บูตแลบ Google Sheets เรียบร้อย</p>
             </div>
             <div className="bg-emerald-50 text-[#00914E] p-3 rounded-xl">
               <Users className="w-6 h-6" />
@@ -348,7 +352,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
             <div>
               <p className="text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">จำนวนก้าวเฉลี่ยต่อการรายงาน</p>
               <h2 className="text-3xl font-black text-black mt-2 font-mono">{averageSteps.toLocaleString()} <span className="text-xs text-slate-500 font-semibold font-sans">ก้าว</span></h2>
-              <p className="text-[10px] text-slate-500 font-semibold mt-1">คำนวณจากคลังข้อมูลดิบ Firestore</p>
+              <p className="text-[10px] text-slate-500 font-semibold mt-1">คำนวณจากฐานข้อมูล Google Sheets</p>
             </div>
             <div className="bg-purple-50 text-purple-600 p-3 rounded-xl">
               <Ticket className="w-6 h-6" />
@@ -461,7 +465,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
             {isLoading ? (
               <div className="p-16 text-center">
                 <div className="w-8 h-8 border-3 border-[#00914E] border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-xs font-extrabold text-slate-500 mt-3 font-sans">กำลังดึงฐานพนักงานจริงจาก Thairath Firestore...</p>
+                <p className="text-xs font-extrabold text-slate-500 mt-3 font-sans">กำลังดึงฐานพนักงานจริงจาก Thairath Google Sheets...</p>
               </div>
             ) : filteredUsers.length === 0 ? (
               <div className="p-16 text-center text-slate-400 font-bold text-xs">
@@ -588,7 +592,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
             {isLoading ? (
               <div className="p-16 text-center">
                 <div className="w-8 h-8 border-3 border-[#00914E] border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-xs font-extrabold text-slate-500 mt-3 font-sans">กำลังดึงรายการหลักฐานการส่งก้าวพนักงานทั้งหมดจาก Firestore...</p>
+                <p className="text-xs font-extrabold text-slate-500 mt-3 font-sans">กำลังดึงรายการหลักฐานการส่งก้าวพนักงานทั้งหมดจาก Google Sheets...</p>
               </div>
             ) : filteredLogs.length === 0 ? (
               <div className="p-16 text-center text-slate-400 font-bold text-xs">
@@ -842,29 +846,41 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">ชื่อและนามสกุลจริง</label>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">ชื่อจริง</label>
                   <input
                     type="text"
                     value={newEmpName}
                     onChange={(e) => setNewEmpName(e.target.value)}
-                    placeholder="เช่น สมชาย สุขสำราญ"
+                    placeholder="เช่น สมชาย"
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white font-bold"
                     required
                   />
                 </div>
-                
+
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">ชื่อเล่นแสดงผล</label>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">นามสกุล</label>
                   <input
                     type="text"
-                    value={newEmpNickname}
-                    onChange={(e) => setNewEmpNickname(e.target.value)}
-                    placeholder="เช่น หนุ่ย"
-                    maxLength={15}
+                    value={newEmpSurname}
+                    onChange={(e) => setNewEmpSurname(e.target.value)}
+                    placeholder="เช่น สุขสำราญ"
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white font-bold"
                     required
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">ชื่อเล่นแสดงผล</label>
+                <input
+                  type="text"
+                  value={newEmpNickname}
+                  onChange={(e) => setNewEmpNickname(e.target.value)}
+                  placeholder="เช่น หนุ่ย"
+                  maxLength={15}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white font-bold"
+                  required
+                />
               </div>
 
               <div>
@@ -881,16 +897,15 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">รหัสผ่าน 6 หลัก (แนะนำวันเกิดพ.ศ.)</label>
+                <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">วันเกิด</label>
                 <input
-                  type="text"
-                  maxLength={6}
-                  value={newEmpPassword}
-                  onChange={(e) => setNewEmpPassword(e.target.value.replace(/\D/g, ''))}
-                  placeholder="เช่น 150538"
+                  type="date"
+                  value={newEmpBirthDate}
+                  onChange={(e) => setNewEmpBirthDate(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white text-sm font-bold font-mono"
                   required
                 />
+                <p className="mt-1 text-[10px] text-slate-400 font-bold">ระบบจะคำนวณอายุและสร้างรหัสผ่านรูปแบบ DDMMYY พ.ศ. ให้อัตโนมัติ</p>
               </div>
 
               <div className="flex gap-2 pt-3">
@@ -906,7 +921,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
                   disabled={isSavingUser}
                   className="w-1/2 bg-[#00914E] hover:bg-[#00703c] disabled:bg-slate-350 text-white py-3 rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow-sm"
                 >
-                  {isSavingUser ? 'กำลังบันทึกลงคลาวด์...' : 'เพิ่มพนักงานสำเร็จ'}
+                  {isSavingUser ? 'กำลังบันทึกลง Sheets...' : 'เพิ่มพนักงานสำเร็จ'}
                 </button>
               </div>
 

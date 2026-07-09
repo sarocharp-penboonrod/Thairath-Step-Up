@@ -3,11 +3,9 @@ import { Lock, User, Building2, ArrowRight, Eye, EyeOff, ShieldCheck } from 'luc
 import { ActiveUser, DepartmentInfo } from '../types';
 import { 
   seedInitialDataIfNecessary, 
-  getUserProfile, 
-  createUserOrUpdateProfile,
-  db
-} from '../firebase';
-import { getDoc, doc } from 'firebase/firestore';
+  verifyEmployeeLogin,
+  createUserOrUpdateProfile
+} from '../sheetsBackend';
 
 interface LoginViewProps {
   departments: DepartmentInfo[];
@@ -24,12 +22,11 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
   const [signinError, setSigninError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // New-user First-time Sync-up States (To keep "no manual registration needed" but support custom profiles)
+  // First-time profile setup after employee ID + birthdate are verified in Google Sheets
   const [firstTimeSetupActive, setFirstTimeSetupActive] = useState(false);
-  const [newName, setNewName] = useState('');
+  const [pendingProfile, setPendingProfile] = useState<ActiveUser | null>(null);
   const [newNickname, setNewNickname] = useState('');
   const [newDept, setNewDept] = useState(departments[0]?.id || 'ceo');
-  const [newAge, setNewAge] = useState<number>(30);
   const [newUserError, setNewUserError] = useState('');
 
   // Seed on initial mount
@@ -97,38 +94,28 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
 
     setLoading(true);
     try {
-      // 1. Verify if user profile exists in Firestore
-      const profile = await getUserProfile(cleanId);
-      
-      if (!profile) {
-        // If not found in seed, since they don't have to register, let's open first-time profile creation!
+      // Verify against Google Sheets employee database before entering the app.
+      const loginResult = await verifyEmployeeLogin(cleanId, cleanPassword);
+      const profile = {
+        ...loginResult.profile,
+        employeeId: cleanId,
+        email: loginResult.profile.email || `${cleanId}@thairathgroup.com`
+      };
+
+      if (loginResult.requiresSetup) {
+        setPendingProfile(profile);
+        setNewNickname(profile.nickname || '');
+        setNewDept(profile.departmentId || departments[0]?.id || 'ceo');
         setFirstTimeSetupActive(true);
         setLoading(false);
         return;
       }
 
-      // 2. Fetch specific document to check passphrase (password)
-      const userRef = doc(db, 'users', cleanId);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
-        const dbData = userSnap.data();
-        if (dbData.password && dbData.password !== cleanPassword) {
-          setSigninError('รหัสผ่านประจำตัว (วันเดือนปีเกิด) ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
-          setLoading(false);
-          return;
-        }
-      }
-
-      // 3. Complete login successfully!
-      onLoginSuccess({
-        ...profile,
-        employeeId: cleanId,
-        email: profile.email || `${cleanId}@thairathgroup.com`
-      });
+      onLoginSuccess(profile);
 
     } catch (err: any) {
       console.error(err);
-      setSigninError('เกิดข้อผิดพลาดจากเครือข่ายฐานข้อมูลหรือ Firebase: ' + err.message);
+      setSigninError(err.message || 'เกิดข้อผิดพลาดจากเครือข่ายฐานข้อมูล Google Sheets');
     } finally {
       setLoading(false);
     }
@@ -145,31 +132,29 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
       setNewUserError('กรุณากรอกชื่อเล่นเพื่อแสดงในระบบบอร์ด');
       return;
     }
-    if (!newAge || newAge < 1 || newAge > 120) {
-      setNewUserError('กรุณากรอกอายุที่ถูกต้อง (1-120 ปี)');
-      return;
-    }
 
     setLoading(true);
     try {
       const displayNickname = newNickname.trim();
       const newUser: ActiveUser = {
-        name: `คุณ${displayNickname}`,
+        ...(pendingProfile || ({} as ActiveUser)),
+        name: pendingProfile?.name || `คุณ${displayNickname}`,
         nickname: displayNickname,
         departmentId: newDept,
-        weekTarget: 60000, // Default goal is 60,000 steps per week standard
-        totalTickets: 2, // 2 initial free tickets welcome gift for logging in first time!
-        email: `${cleanId}@thairathgroup.com`,
+        weekTarget: pendingProfile?.weekTarget || 60000,
+        totalTickets: pendingProfile?.totalTickets ?? 2,
+        email: pendingProfile?.email || `${cleanId}@thairathgroup.com`,
         employeeId: cleanId,
-        age: newAge
+        age: pendingProfile?.age,
+        dateOfBirth: pendingProfile?.dateOfBirth
       };
 
-      // Save user profile to Live Firebase Database
+      // Save first-time profile setup to Google Sheets. Age is calculated from birthdate in the employee database.
       await createUserOrUpdateProfile(cleanId, newUser, cleanPassword);
       onLoginSuccess(newUser);
     } catch (err: any) {
       console.error(err);
-      setNewUserError('เกิดปัญหาในการสร้างโปรไฟล์พนักงานใหม่: ' + err.message);
+      setNewUserError('เกิดปัญหาในการบันทึกโปรไฟล์พนักงาน: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -349,12 +334,12 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
                   <ShieldCheck className="w-7 h-7" />
                 </div>
                 <h3 className="text-lg font-black text-slate-900">ตรวจพบผู้ใช้งานครั้งแรก! ✨</h3>
-                <p className="text-xs text-slate-500 mt-1 font-medium leading-relaxed">ระบบอัตโนมัติพร้อมให้เริ่มบันทึกก้าวได้ทันที เพียงระบุข้อมูลของคุณ</p>
+                <p className="text-xs text-slate-500 mt-1 font-medium leading-relaxed">ยืนยันตัวตนจากฐานพนักงานแล้ว เหลือเพียงตั้งชื่อเล่นและฝ่ายสำหรับแสดงบนบอร์ด</p>
               </div>
 
               <div className="bg-slate-50 p-3 rounded-xl text-xs border border-slate-100 space-y-1.5 text-[#344054] font-medium">
                 <div>รหัสพนักงาน: <strong className="font-mono text-[#00914E] bg-white px-2 py-0.5 rounded text-xs border border-slate-100">{employeeId}</strong></div>
-                <div>รหัสผ่านวันเกิด: <strong className="font-mono text-gray-800 bg-white px-2 py-0.5 rounded text-xs border border-slate-100">{password}</strong></div>
+                <div>อายุจากฐานวันเกิด: <strong className="font-mono text-gray-800 bg-white px-2 py-0.5 rounded text-xs border border-slate-100">{pendingProfile?.age ? `${pendingProfile.age} ปี` : 'คำนวณอัตโนมัติ'}</strong></div>
               </div>
 
               {newUserError && (
@@ -398,22 +383,6 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
                     ))}
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1 tracking-wider">
-                  อายุ (ปี)
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={120}
-                  value={newAge}
-                  onChange={(e) => setNewAge(Number(e.target.value))}
-                  placeholder="เช่น 30"
-                  className="w-full bg-[#F8FAFC] border border-slate-200 rounded-xl px-4 py-3 text-xs sm:text-sm font-semibold outline-none focus:border-[#00914E] focus:bg-white text-gray-800 transition-all font-mono"
-                  required
-                />
               </div>
 
               <div className="flex gap-2 pt-2">

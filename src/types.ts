@@ -21,6 +21,8 @@ export interface DepartmentInfo {
 
 export interface ActiveUser {
   name: string;
+  surname?: string;
+  Surename?: string; // kept for Google Sheets header compatibility
   nickname: string;
   departmentId: string;
   weekTarget: number; // e.g. 60000
@@ -28,7 +30,9 @@ export interface ActiveUser {
   email?: string;
   employeeId?: string;
   age?: number;
+  dateOfBirth?: string; // YYYY-MM-DD, used by Google Sheets backend to calculate age and birthdate password
 }
+
 
 export interface WeekConfig {
   number: number;

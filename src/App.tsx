@@ -21,8 +21,8 @@ import {
   fetchUserLogs, 
   saveUserLog, 
   deleteUserLog, 
-  calculateFirestoreLeaderboard 
-} from './firebase';
+  calculateSheetsLeaderboard 
+} from './sheetsBackend';
 
 export default function App() {
   // 1. Core States
@@ -36,7 +36,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_USER;
   });
 
-  // Keep a local replica of stepLogs and departments that match real-time Firestore
+  // Keep a local replica of stepLogs and departments that match Google Sheets backend
   const [stepLogs, setStepLogs] = useState<StepLog[]>([]);
   const [departments, setDepartments] = useState<DepartmentInfo[]>(INITIAL_DEPARTMENTS);
   const [currentWeek, setCurrentWeek] = useState<number>(() => {
@@ -71,7 +71,7 @@ export default function App() {
     localStorage.setItem('thairath_is_logged_in', isLoggedIn ? 'true' : 'false');
   }, [isLoggedIn]);
 
-  // Load user logs and leaderboard from Firestore
+  // Load user logs and leaderboard from Google Sheets
   const loadDatabaseData = async () => {
     if (isLoggedIn && activeUser?.email) {
       setDbSyncing(true);
@@ -79,10 +79,10 @@ export default function App() {
         const fetchedLogs = await fetchUserLogs(activeUser.email);
         setStepLogs(fetchedLogs);
 
-        const lb = await calculateFirestoreLeaderboard(currentWeek);
+        const lb = await calculateSheetsLeaderboard(currentWeek);
         setDepartments(lb);
       } catch (err) {
-        console.error('Error syncing with live Firestore:', err);
+        console.error('Error syncing with live Google Sheets:', err);
       } finally {
         setDbSyncing(false);
       }
@@ -97,7 +97,7 @@ export default function App() {
 
   const refreshLeaderboardOnly = async () => {
     try {
-      const lb = await calculateFirestoreLeaderboard(currentWeek);
+      const lb = await calculateSheetsLeaderboard(currentWeek);
       setDepartments(lb);
     } catch (err) {
       console.error(err);
@@ -142,7 +142,7 @@ export default function App() {
   };
 
   const handleDeleteLog = async (id: string) => {
-    if (window.confirm('คุณต้องการลบรายงานตัวนี้ออกจากการคำนวณจริงในระบบคลาวด์หรือไม่?')) {
+    if (window.confirm('คุณต้องการลบรายงานตัวนี้ออกจากการคำนวณจริงในระบบ Google Sheetsหรือไม่?')) {
       setStepLogs(prev => prev.filter(log => log.id !== id));
       
       setDbSyncing(true);
@@ -358,7 +358,7 @@ export default function App() {
             <div className="absolute inset-x-0 top-12 flex justify-center z-40">
               <div className="bg-white px-4 py-2.5 rounded-full border border-slate-200 shadow-lg text-xs font-bold flex items-center gap-2.5 text-[#008148]">
                 <div className="w-4.5 h-4.5 border-2 border-[#008148] border-t-transparent rounded-full animate-spin"></div>
-                กำลังโหลดข้อมูลพนักงานจริงจาก Thairath Cloud Firestore...
+                กำลังโหลดข้อมูลพนักงานจริงจาก Thairath Google Sheets...
               </div>
             </div>
           )}
@@ -407,7 +407,7 @@ export default function App() {
             <div className="bg-[#e6f5ee] border-l-4 border-[#008148] p-4.5 rounded-r-2xl border border-transparent">
               <h3 className="text-sm font-extrabold text-[#000000] flex items-center gap-2">
                 <Trophy className="w-4.5 h-4.5 text-amber-500" />
-                โหมดดึงดูดสายตา: สตอรี่บอร์ดรีวิว 3 หน้าจอเชื่อมต่อฐานข้อมูล Firestore จริง
+                โหมดดึงดูดสายตา: สตอรี่บอร์ดรีวิว 3 หน้าจอเชื่อมต่อฐานข้อมูล Google Sheets จริง
               </h3>
               <p className="text-xs text-[#344054] font-medium leading-relaxed mt-1">
                 เพื่อตอบรับการใช้งานจริง ทุกการกระทำบนจำลองทั้ง 3 หน้านี้ เช่นการรายงานภาพก้าวหรือสลับแผนก จะถูกเซฟเข้าสู่คลาวด์ดาต้าเบสของไทยรัฐโดยตรง และคำนวณสถิติเฉลี่ยร่วมส่งต่อพร้อมเพรียงกันทันที!
