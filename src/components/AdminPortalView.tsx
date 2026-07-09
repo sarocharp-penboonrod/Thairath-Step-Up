@@ -80,6 +80,72 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
     loadAdminData();
   }, []);
 
+  const normalizeDeptKey = (value?: string) =>
+    String(value || '').trim().toLowerCase().replace(/^ฝ่าย\s*/i, '').replace(/\s+/g, ' ');
+
+  const allDepartments = React.useMemo<DepartmentInfo[]>(() => {
+    const deptMap = new Map<string, DepartmentInfo>();
+
+    const addDept = (dept: DepartmentInfo) => {
+      if (!dept?.id) return;
+      deptMap.set(dept.id, dept);
+    };
+
+    departments.forEach(addDept);
+
+    users.forEach((u) => {
+      const rawDept = String(u.departmentId || u.departmentName || u.rawDepartmentId || '').trim();
+      if (!rawDept) return;
+
+      const matched = Array.from(deptMap.values()).find((d) =>
+        [d.id, d.nameTh, d.nameEn].some((value) => normalizeDeptKey(value) === normalizeDeptKey(rawDept))
+      );
+
+      if (!matched) {
+        deptMap.set(rawDept, {
+          id: rawDept,
+          nameTh: String(u.departmentName || rawDept),
+          nameEn: String(u.departmentName || rawDept),
+          participationRate: 0,
+          averageStepsPerPerson: 0,
+          status: 'stable',
+          statusText: 'ข้อมูลจาก Google Sheets'
+        });
+      }
+    });
+
+    return Array.from(deptMap.values());
+  }, [departments, users]);
+
+  const resolveDepartment = (departmentId?: string) => {
+    const key = normalizeDeptKey(departmentId);
+    if (!key) return null;
+    return allDepartments.find((d) =>
+      [d.id, d.nameTh, d.nameEn].some((value) => normalizeDeptKey(value) === key)
+    ) || null;
+  };
+
+  const isSameDepartment = (departmentId?: string, filterDepartmentId?: string) => {
+    if (!filterDepartmentId || filterDepartmentId === 'all') return true;
+    const userDept = resolveDepartment(departmentId);
+    const filterDept = resolveDepartment(filterDepartmentId);
+    return normalizeDeptKey(userDept?.id || departmentId) === normalizeDeptKey(filterDept?.id || filterDepartmentId);
+  };
+
+  const formatDateTime = (value?: string) => {
+    if (!value) return 'ยังไม่เคย Login';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString('th-TH', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+  };
+
   // Delete Log handler
   const handleDeleteLogClick = async (logId: string) => {
     if (window.confirm('คุณแน่ใจหรือไม่ที่จะลบรายการก้าวตัวนี้? ข้อมูลนี้จะหายไปจากสถิติ Leaderboard และไม่สามารถกู้คืนได้')) {
@@ -179,13 +245,13 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
     let filename = "";
 
     if (type === 'employees') {
-      csvContent += "รหัสพนักงาน,ชื่อ-นามสกุลจริง,ชื่อเล่น,ฝ่าย/แผนกงานย่อย,รหัสผ่าน(วันเกิดพ.ศ.),ตั๋วทองจับฉลากวิเศษ\n";
+      csvContent += "รหัสพนักงาน,ชื่อ-นามสกุลจริง,ชื่อเล่น,ฝ่าย/แผนกงานย่อย,รหัสผ่าน(วันเกิดพ.ศ.),Login ล่าสุด,ตั๋วทองจับฉลากวิเศษ\n";
       users.forEach(u => {
-        const dept = departments.find(d => d.id === u.departmentId);
+        const dept = resolveDepartment(u.departmentId);
         const deptName = dept ? dept.nameTh : 'ไม่ระบุ';
         const cleanName = ([u.name, u.surname || u.Surename].filter(Boolean).join(' ') || '').replace(/,/g, ' ');
         const cleanNickname = (u.nickname || '').replace(/,/g, ' ');
-        csvContent += `${u.employeeId || ''},${cleanName},${cleanNickname},${deptName},${u.password || ''},${u.totalTickets || 0}\n`;
+        csvContent += `${u.employeeId || ''},${cleanName},${cleanNickname},${deptName},${u.password || ''},${formatDateTime(u.lastLoginAt)},${u.totalTickets || 0}\n`; 
       });
       filename = `thairath_employees_database_${new Date().toISOString().slice(0, 10)}.csv`;
     } else {
@@ -194,7 +260,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
         const userProfile = users.find(u => u.email.toLowerCase() === l.userEmail.toLowerCase());
         const empId = userProfile ? userProfile.employeeId : '';
         const empName = userProfile ? userProfile.name.replace(/,/g, ' ') : '';
-        const dept = userProfile ? departments.find(d => d.id === userProfile.departmentId) : null;
+        const dept = userProfile ? resolveDepartment(userProfile.departmentId) : null;
         const deptName = dept ? dept.nameTh : 'ไม่ระบุ';
         const cleanImgName = (l.imageName || '').replace(/,/g, ' ');
         const formattedDate = new Date(l.submittedAt).toLocaleString('th-TH', { hour12: false }).replace(/,/g, ' ');
@@ -220,9 +286,9 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
   const averageSteps = totalLogsCount > 0 ? Math.round(totalStepsSum / totalLogsCount) : 0;
 
   // Compute department leaderboard for Admin
-  const adminDeptLeaderboard = departments.map((d) => {
+  const adminDeptLeaderboard = allDepartments.map((d) => {
     // Find all users in this department
-    const deptUsers = users.filter(u => u.departmentId === d.id);
+    const deptUsers = users.filter(u => isSameDepartment(u.departmentId, d.id));
     const deptUserEmails = deptUsers.map(u => u.email?.toLowerCase() || `${u.employeeId}@thairathgroup.com`.toLowerCase());
     
     // Total steps submitted by these users
@@ -251,12 +317,12 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
   // Filtered Users
   const filteredUsers = users.filter(u => {
     const matchesSearch = 
-      u.name.toLowerCase().includes(userSearchText.toLowerCase()) ||
-      u.nickname.toLowerCase().includes(userSearchText.toLowerCase()) ||
-      u.employeeId.includes(userSearchText) ||
-      u.email.toLowerCase().includes(userSearchText.toLowerCase());
+      String(u.name || '').toLowerCase().includes(userSearchText.toLowerCase()) ||
+      String(u.nickname || '').toLowerCase().includes(userSearchText.toLowerCase()) ||
+      String(u.employeeId || '').includes(userSearchText) ||
+      String(u.email || '').toLowerCase().includes(userSearchText.toLowerCase());
     
-    const matchesDept = userDeptFilter === 'all' || u.departmentId === userDeptFilter;
+    const matchesDept = isSameDepartment(u.departmentId, userDeptFilter);
     return matchesSearch && matchesDept;
   });
 
@@ -428,7 +494,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
                   className="bg-white border border-slate-250 rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer"
                 >
                   <option value="all">ฝ่ายทั้งหมด (All)</option>
-                  {departments.map(d => (
+                  {allDepartments.map(d => (
                     <option key={d.id} value={d.id}>{d.nameTh}</option>
                   ))}
                 </select>
@@ -480,13 +546,14 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
                       <th className="py-4.5 px-6">ชื่อ-นามสกุล / ชื่อเล่น</th>
                       <th className="py-4.5 px-6">ฝ่ายย่อย (Department)</th>
                       <th className="py-4.5 px-6 text-center">รหัสผ่าน (วันเกิดปีพ.ศ.)</th>
+                      <th className="py-4.5 px-6 text-center">Login ล่าสุด</th>
                       <th className="py-4.5 px-6 text-center">ตั๋วจับฉลากวิเศษ</th>
                       <th className="py-4.5 px-6 text-right">ดำเนินการหลังบ้าน</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-150">
                     {filteredUsers.map((u) => {
-                      const dept = departments.find(d => d.id === u.departmentId);
+                      const dept = resolveDepartment(u.departmentId);
                       return (
                         <tr key={u.id} className="hover:bg-slate-50/50 transition-colors font-medium text-[#344054]">
                           <td className="py-4 px-6 font-mono font-bold text-[#00914E]">
@@ -504,6 +571,9 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
                           </td>
                           <td className="py-4 px-6 text-center font-mono font-extrabold text-slate-700 bg-slate-50/40">
                             {u.password || 'ไม่มี'}
+                          </td>
+                          <td className="py-4 px-6 text-center text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                            {formatDateTime(u.lastLoginAt)}
                           </td>
                           <td className="py-4 px-6 text-center">
                             <div className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-600 px-3 py-1.5 rounded-xl font-mono text-[13px] font-black border border-amber-100/60 shadow-2xs">
@@ -615,7 +685,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
                   <tbody className="divide-y divide-slate-150">
                     {filteredLogs.map((log) => {
                       const userProfile = users.find(u => u.email.toLowerCase() === log.userEmail.toLowerCase());
-                      const dept = userProfile ? departments.find(d => d.id === userProfile.departmentId) : null;
+                      const dept = userProfile ? resolveDepartment(userProfile.departmentId) : null;
                       
                       return (
                         <tr key={log.id} className="hover:bg-slate-50/50 transition-colors font-medium">
@@ -762,7 +832,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
               ) : (
                 <div className="space-y-3">
                   {top10TicketUsers.map((emp, index) => {
-                    const dept = departments.find(d => d.id === emp.departmentId);
+                    const dept = resolveDepartment(emp.departmentId);
                     
                     const rankColors = [
                       'bg-amber-100 text-amber-800 border-amber-200', // 1st
@@ -890,7 +960,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
                   onChange={(e) => setNewEmpDept(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white text-xs font-bold cursor-pointer"
                 >
-                  {departments.map(d => (
+                  {allDepartments.map(d => (
                     <option key={d.id} value={d.id}>{d.nameTh}</option>
                   ))}
                 </select>

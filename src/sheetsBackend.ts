@@ -44,10 +44,10 @@ function normalizeUserKey(userKey: string): string {
 }
 
 function withSafeDepartment(profile: ActiveUser): ActiveUser {
-  const knownDept = INITIAL_DEPARTMENTS.some(d => d.id === profile.departmentId);
+  const departmentId = String(profile.departmentId || '').trim();
   return {
     ...profile,
-    departmentId: knownDept ? profile.departmentId : INITIAL_DEPARTMENTS[0]?.id || 'ceo',
+    departmentId: departmentId || INITIAL_DEPARTMENTS[0]?.id || 'ceo',
     weekTarget: Number(profile.weekTarget) || 60000,
     totalTickets: Number(profile.totalTickets) || 0,
     age: profile.age ? Number(profile.age) : undefined

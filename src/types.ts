@@ -31,7 +31,9 @@ export interface ActiveUser {
   employeeId?: string;
   age?: number;
   dateOfBirth?: string; // YYYY-MM-DD, used by Google Sheets backend to calculate age and birthdate password
+  lastLoginAt?: string; // ISO timestamp from Google Sheets backend
 }
+
 
 
 export interface WeekConfig {

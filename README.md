@@ -24,7 +24,7 @@ Create a Google Sheet with these sheets. The Apps Script also creates them autom
 
 ### Employees
 
-| employeeId | password | dateOfBirth | name | Surename | nickname | departmentId | weekTarget | totalTickets | email | status | createdAt | updatedAt |
+| employeeId | password | dateOfBirth | name | Surename | nickname | departmentId | weekTarget | totalTickets | email | status | createdAt | updatedAt | lastLoginAt | lastLoginAt |
 |---|---|---|---|---|---|---:|---:|---|---|---|---|
 
 Notes:
@@ -89,7 +89,7 @@ Google Sheets Spreadsheet ID: `1YgxxKpP74EkzfzAJn2wnTXamrYJ9-aBZsKwcBo7v3Dk`
 Employees header must be:
 
 ```text
-employeeId | password | dateOfBirth | name | Surename | nickname | departmentId | weekTarget | totalTickets | email | status | createdAt | updatedAt
+employeeId | password | dateOfBirth | name | Surename | nickname | departmentId | weekTarget | totalTickets | email | status | createdAt | updatedAt | lastLoginAt
 ```
 
 ## Linked Apps Script Web App
@@ -102,3 +102,9 @@ https://script.google.com/macros/s/AKfycbzLD67Y13eXGOtZO9PJNC9DtGe6ZDCoPxcIGe8GY
 
 Use this exact value for `GOOGLE_APPS_SCRIPT_URL` in Vercel Environment Variables.
 
+
+
+## Latest Admin Fix
+
+- Admin Department filter now reads both known department IDs and department names coming directly from Google Sheets. If a department is not in the original preset list, the app creates a dynamic department option automatically.
+- Employee login now updates `lastLoginAt` in the Employees sheet every time a login succeeds. This column is also shown in the Admin employee table and CSV export.
