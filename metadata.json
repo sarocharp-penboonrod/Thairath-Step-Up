@@ -1,6 +1,13 @@
 {
-  "name": "Thairath Step Up",
-  "description": "Thairath Step Up & Health Up - An interactive fitness tracker dashboard, submission portal, and department leaderboard designed for Thairath Logistics employees.",
+  "name": "Thairath Step Up & Health Up",
+  "version": "2.0.0",
+  "description": "Employee wellness dashboard, weekly step submission portal, department leaderboard, and admin reporting center for Thairath Logistics.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "EMPLOYEE_ID_LOGIN",
+    "GOOGLE_SHEETS_BACKEND",
+    "WEEKLY_STEP_SUBMISSION",
+    "DEPARTMENT_LEADERBOARD",
+    "ADMIN_REPORTING"
+  ]
 }

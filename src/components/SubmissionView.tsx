@@ -1,81 +1,37 @@
 import React, { useState, useRef } from 'react';
-import { Upload, CircleCheck, AlertTriangle, Image as ImageIcon, Flame, Calendar, RefreshCw, Sparkles, HelpCircle } from 'lucide-react';
-import { ActiveUser, StepLog, WeekConfig } from '../types';
+import { Upload, CircleCheck, AlertTriangle, Flame, Calendar, Sparkles, HelpCircle } from 'lucide-react';
+import { ActiveUser, StepLog } from '../types';
+import { CAMPAIGN_MONTHS, getCampaignMonth, getCampaignWeek } from '../campaignConfig';
 
 interface SubmissionViewProps {
   activeUser: ActiveUser;
   currentWeek: number;
-  weeks: WeekConfig[];
-  onAddLog: (steps: number, date: string, imageName: string, imagePreview?: string, weekNumber?: number, weekOfMonth?: number) => void;
+  stepLogs: StepLog[];
+  onAddLog: (steps: number, date: string, imageName: string, imagePreview?: string, weekNumber?: number, weekOfMonth?: number) => Promise<void>;
   setActiveTab: (tab: string) => void;
 }
 
 export default function SubmissionView({
   activeUser,
   currentWeek,
-  weeks,
+  stepLogs,
   onAddLog,
   setActiveTab
 }: SubmissionViewProps) {
-  // Month selector options based on user requirement
-  const MONTHS_LIST = [
-    { number: 1, label: 'กรกฎาคม 2026' },
-    { number: 2, label: 'สิงหาคม 2026' },
-    { number: 3, label: 'กันยายน 2026' },
-    { number: 4, label: 'ตุลาคม 2026' },
-    { number: 5, label: 'พฤศจิกายน 2026' },
-    { number: 6, label: 'ธันวาคม 2026' }
-  ];
+  const MONTHS_LIST = CAMPAIGN_MONTHS.map((month) => ({
+    number: month.number,
+    label: month.label
+  }));
 
-  // Friday-ending week ranges based on exact 2026 calendar
-  const CALENDAR_DATA: Record<number, { number: number; label: string; range: string; endDateString: string }[]> = {
-    1: [ // กรกฎาคม 2026
-      { number: 1, label: 'สัปดาห์ที่ 1', range: '1 ก.ค. - 10 ก.ค. 2026', endDateString: '2026-07-10' },
-      { number: 2, label: 'สัปดาห์ที่ 2', range: '11 ก.ค. - 17 ก.ค. 2026', endDateString: '2026-07-17' },
-      { number: 3, label: 'สัปดาห์ที่ 3', range: '18 ก.ค. - 24 ก.ค. 2026', endDateString: '2026-07-24' },
-      { number: 4, label: 'สัปดาห์ที่ 4', range: '25 ก.ค. - 31 ก.ค. 2026', endDateString: '2026-07-31' }
-    ],
-    2: [ // สิงหาคม 2026
-      { number: 1, label: 'สัปดาห์ที่ 1', range: '1 ส.ค. - 7 ส.ค. 2026', endDateString: '2026-08-07' },
-      { number: 2, label: 'สัปดาห์ที่ 2', range: '8 ส.ค. - 14 ส.ค. 2026', endDateString: '2026-08-14' },
-      { number: 3, label: 'สัปดาห์ที่ 3', range: '15 ส.ค. - 21 ส.ค. 2026', endDateString: '2026-08-21' },
-      { number: 4, label: 'สัปดาห์ที่ 4', range: '22 ส.ค. - 28 ส.ค. 2026', endDateString: '2026-08-28' }
-    ],
-    3: [ // กันยายน 2026
-      { number: 1, label: 'สัปดาห์ที่ 1', range: '29 ส.ค. - 4 ก.ย. 2026', endDateString: '2026-09-04' },
-      { number: 2, label: 'สัปดาห์ที่ 2', range: '5 ก.ย. - 11 ก.ย. 2026', endDateString: '2026-09-11' },
-      { number: 3, label: 'สัปดาห์ที่ 3', range: '12 ก.ย. - 18 ก.ย. 2026', endDateString: '2026-09-18' },
-      { number: 4, label: 'สัปดาห์ที่ 4', range: '19 ก.ย. - 25 ก.ย. 2026', endDateString: '2026-09-25' }
-    ],
-    4: [ // ตุลาคม 2026
-      { number: 1, label: 'สัปดาห์ที่ 1', range: '26 ก.ย. - 2 ต.ค. 2026', endDateString: '2026-10-02' },
-      { number: 2, label: 'สัปดาห์ที่ 2', range: '3 ต.ค. - 9 ต.ค. 2026', endDateString: '2026-10-09' },
-      { number: 3, label: 'สัปดาห์ที่ 3', range: '10 ต.ค. - 16 ต.ค. 2026', endDateString: '2026-10-16' },
-      { number: 4, label: 'สัปดาห์ที่ 4', range: '17 ต.ค. - 23 ต.ค. 2026', endDateString: '2026-10-23' },
-      { number: 5, label: 'สัปดาห์ที่ 5', range: '24 ต.ค. - 30 ต.ค. 2026', endDateString: '2026-10-30' }
-    ],
-    5: [ // พฤศจิกายน 2026
-      { number: 1, label: 'สัปดาห์ที่ 1', range: '31 ต.ค. - 6 พ.ย. 2026', endDateString: '2026-11-06' },
-      { number: 2, label: 'สัปดาห์ที่ 2', range: '7 พ.ย. - 13 พ.ย. 2026', endDateString: '2026-11-13' },
-      { number: 3, label: 'สัปดาห์ที่ 3', range: '14 พ.ย. - 20 พ.ย. 2026', endDateString: '2026-11-20' },
-      { number: 4, label: 'สัปดาห์ที่ 4', range: '21 พ.ย. - 27 พ.ย. 2026', endDateString: '2026-11-27' }
-    ],
-    6: [ // ธันวาคม 2026
-      { number: 1, label: 'สัปดาห์ที่ 1', range: '28 พ.ย. - 4 ธ.ค. 2026', endDateString: '2026-12-04' },
-      { number: 2, label: 'สัปดาห์ที่ 2', range: '5 ธ.ค. - 11 ธ.ค. 2026', endDateString: '2026-12-11' }
-    ]
-  };
+  const getWeeksForMonth = (monthNum: number, _monthLabel: string) => getCampaignMonth(monthNum).weeks.map((week) => ({
+    number: week.number,
+    label: week.label,
+    range: week.range,
+    endDateString: week.endDate
+  }));
 
-  // Helper to get week ranges dynamically
-  const getWeeksForMonth = (monthNum: number, _monthLabel: string) => {
-    return CALENDAR_DATA[monthNum] || CALENDAR_DATA[1];
-  };
-
-  // Custom sync helper to initialize the date within the selected month range
-  const getInitialSyncDate = (mNum: number, wNum: number) => {
-    const list = CALENDAR_DATA[mNum] || CALENDAR_DATA[1];
-    const match = list.find(w => w.number === wNum) || list[0];
-    return match.endDateString;
+  const getInitialSyncDate = (monthNum: number, weekNum: number) => {
+    return getCampaignWeek(monthNum, weekNum)?.endDate || getCampaignMonth(monthNum).weeks[0].endDate;
   };
 
   // Form States
@@ -97,7 +53,7 @@ export default function SubmissionView({
   // Sync date when month or week changes
   const handleMonthChange = (monthNum: number) => {
     setSelectedMonth(monthNum);
-    const availableWeeks = CALENDAR_DATA[monthNum] || CALENDAR_DATA[1];
+    const availableWeeks = getCampaignMonth(monthNum).weeks;
     let nextWeek = selectedWeek;
     if (selectedWeek > availableWeeks.length) {
       nextWeek = 1;
@@ -158,7 +114,7 @@ export default function SubmissionView({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsedSteps = parseInt(steps);
     if (isNaN(parsedSteps) || parsedSteps <= 0) {
@@ -170,17 +126,29 @@ export default function SubmissionView({
       return;
     }
 
-    onAddLog(parsedSteps, selectedDate, imageName, imagePreview, selectedMonth, selectedWeek);
-    setIsSubmitted(true);
-    
-    // Reset form after delay
-    setTimeout(() => {
-      setIsSubmitted(false);
-      setSteps('');
-      setImageName('');
-      setImagePreview('');
-      setActiveTab('dashboard'); // Redirect back to show success
-    }, 2800);
+    const duplicate = stepLogs.some((log) =>
+      Number(log.week) === selectedMonth && Number(log.weekOfMonth) === selectedWeek
+    );
+    if (duplicate) {
+      setErrorMessage('คุณส่งข้อมูลของเดือนและสัปดาห์นี้แล้ว หากต้องการแก้ไข กรุณาติดต่อ Admin ให้ลบรายการเดิมก่อน');
+      return;
+    }
+
+    try {
+      setErrorMessage('');
+      await onAddLog(parsedSteps, selectedDate, imageName, imagePreview, selectedMonth, selectedWeek);
+      setIsSubmitted(true);
+
+      setTimeout(() => {
+        setIsSubmitted(false);
+        setSteps('');
+        setImageName('');
+        setImagePreview('');
+        setActiveTab('dashboard');
+      }, 2200);
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+    }
   };
 
   return (
@@ -233,8 +201,8 @@ export default function SubmissionView({
               <p className="text-xs text-amber-700 leading-normal pl-6 font-medium">
                 ภายใน <strong>วันศุกร์ เวลา 24.00 น.</strong> ของสัปดาห์นั้น ๆ
               </p>
-              <p className="text-[10px] text-amber-600/80 leading-normal pl-6 italic">
-                * สำหรับโหมดทดสอบระบบ (Simulator Mode) ตัวแอปอนุญาตให้ทำรายการได้ตลอดเวลา
+              <p className="text-[10px] text-amber-600/80 leading-normal pl-6">
+                โปรดเลือกเดือนและสัปดาห์ให้ตรงกับภาพหลักฐานก่อนยืนยันการส่ง
               </p>
             </div>
           </div>
@@ -244,7 +212,7 @@ export default function SubmissionView({
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-white p-2.5 rounded-xl border border-gray-100">
                 <span className="text-gray-400 block font-semibold">สิทธิ์ลุ้นนำโชคสะสม</span>
-                <span className="font-black text-[#008148] text-base">{activeUser.totalTickets} ดรอป</span>
+                <span className="font-black text-[#008148] text-base">{activeUser.totalTickets} ใบ</span>
               </div>
               <div className="bg-white p-2.5 rounded-xl border border-gray-100">
                 <span className="text-gray-400 block">อัตราก้าวเป้าหมาย</span>
@@ -265,7 +233,7 @@ export default function SubmissionView({
               </div>
               <h3 className="text-2xl font-black text-[#000000] tracking-tight">บันทึกยอดส่งผลก้าวสำเร็จ!</h3>
               <p className="text-sm text-[#344054] font-medium mt-2 max-w-sm">
-                อัปเดตระดับความสำเร็จและตั๋วนำโชคของคุณแล้ว ยอดก้าวจะคำนวณและเฉลี่ยขึ้นสู่ Leaderboard แผนก {activeUser.nickname} โดยอัตโนมัติ
+                อัปเดตระดับความสำเร็จและตั๋วนำโชคของคุณแล้ว ยอดก้าวจะถูกนำไปคำนวณ Dashboard และ Leaderboard ของฝ่ายคุณโดยอัตโนมัติ
               </p>
               <div className="mt-6 flex items-center gap-2 text-xs font-bold text-[#008148] bg-[#e6f5ee] px-4 py-1.5 rounded-full border border-[#008148]/15">
                 <Sparkles className="w-4 h-4 text-[#008148] animate-spin" />
@@ -280,7 +248,7 @@ export default function SubmissionView({
               <div>
                 <label className="block text-xs font-bold text-[#303133] mb-1.5 flex items-center gap-1">
                   <Calendar className="w-3.5 h-3.5 text-[#00914E]" />
-                  <span>1. เลือกเดือนที่ส่งผล</span>
+                  <span>เลือกเดือนที่ส่งผล</span>
                 </label>
                 <select
                   id="submit-month-select"
@@ -299,7 +267,7 @@ export default function SubmissionView({
               <div>
                 <label className="block text-xs font-bold text-[#303133] mb-1.5 flex items-center gap-1">
                   <Calendar className="w-3.5 h-3.5 text-[#00914E]" />
-                  <span>2. เลือกสัปดาห์</span>
+                  <span>เลือกสัปดาห์</span>
                 </label>
                 <select
                   id="submit-week-select"
@@ -326,7 +294,7 @@ export default function SubmissionView({
             <div className="space-y-1.5">
               <label htmlFor="step-count-input" className="block text-xs font-bold text-[#303133] flex items-center gap-1">
                 <Flame className="w-3.5 h-3.5 text-[#008148] animate-pulse" />
-                <span>1. ระบุจำนวนก้าวยอดสะสมล่าสุด (ก้าว)</span>
+                <span>ระบุจำนวนก้าวรวมของสัปดาห์ (ก้าว)</span>
               </label>
               <input
                 id="step-count-input"
@@ -343,7 +311,7 @@ export default function SubmissionView({
             {/* Screenshots Drag-and-Drop Area */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-[#303133]">
-                2. แนบรูปภาพ Screenshot หน้าจอนับก้าวในมือถือ
+                แนบรูปภาพ Screenshot ยืนยันยอดก้าวของสัปดาห์
               </label>
               
               <div 

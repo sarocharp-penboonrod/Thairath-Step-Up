@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, ShieldCheck, User, Users, Calendar, Award, RefreshCw, Sliders, LogOut } from 'lucide-react';
+import { Activity, ShieldCheck, Award, Sliders, LogOut } from 'lucide-react';
 import { ActiveUser, DepartmentInfo } from '../types';
 
 interface HeaderProps {
@@ -7,9 +7,6 @@ interface HeaderProps {
   setActiveTab: (tab: string) => void;
   activeUser: ActiveUser;
   departments: DepartmentInfo[];
-  currentWeek: number;
-  weeks: { number: number; startDate: string; endDate: string }[];
-  setCurrentWeek: (week: number) => void;
   onOpenSettings: () => void;
   onLogout?: () => void;
   onOpenAdmin: () => void;
@@ -20,9 +17,6 @@ export default function Header({
   setActiveTab,
   activeUser,
   departments,
-  currentWeek,
-  weeks,
-  setCurrentWeek,
   onOpenSettings,
   onLogout,
   onOpenAdmin
@@ -40,17 +34,17 @@ export default function Header({
             <div className="h-11 select-none flex items-center pr-1">
               <svg viewBox="0 0 160 55" className="h-full w-auto" fill="none" xmlns="http://www.w3.org/2000/svg">
                 {/* THAIRATH Green Text */}
-                <text x="0" y="20" fill="#00914E" style={{ fontSize: '20px', fontWeight: '900', fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '0.04em' }}>
+                <text x="0" y="20" fill="#00914E" style={{ fontSize: '20px', fontWeight: '900', fontFamily: 'Prompt, sans-serif', letterSpacing: '0.04em' }}>
                   THAIRATH
                 </text>
                 
                 {/* HEALTH Wordmark on Left */}
-                <text x="0" y="44" fill="#000000" style={{ fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: '800', fontSize: '15px' }} letterSpacing="0.01em">
+                <text x="0" y="44" fill="#000000" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '800', fontSize: '15px' }} letterSpacing="0.01em">
                   HEALTH
                 </text>
 
                 {/* Up! Wordmark on Right */}
-                <text x="88" y="44" fill="#00914E" style={{ fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: '900', fontSize: '15px' }} letterSpacing="0.01em">
+                <text x="88" y="44" fill="#00914E" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '900', fontSize: '15px' }} letterSpacing="0.01em">
                   Up!
                 </text>
 
@@ -114,7 +108,7 @@ export default function Header({
           {/* Setting Trigger & Profile */}
           <div className="flex items-center gap-3">
             {/* Admin Console Entry */}
-            {(activeUser.employeeId === '100202' || activeUser.nickname === 'เบ' || activeUser.email?.toLowerCase().includes('worapong.b') || activeUser.nickname === 'Admin') && (
+            {activeUser.nickname === 'Admin' && (
               <button
                 onClick={onOpenAdmin}
                 className="flex items-center gap-1.5 bg-[#E8F5E9] border border-emerald-300 text-[#00914E] hover:bg-[#d4edd9] px-3.5 py-2 rounded-xl font-extrabold text-xs transition-all cursor-pointer shadow-3xs"
@@ -142,7 +136,7 @@ export default function Header({
               <div className="text-left hidden xs:block">
                 <p className="font-bold text-xs text-[#000000]">{activeUser.name}</p>
                 <p className="text-[10px] text-[#344054] font-medium leading-none">
-                  {userDept?.nameTh || 'ไม่ระบุแผนก'}
+                  {userDept?.nameTh || activeUser.departmentId || 'ไม่ระบุฝ่าย'}
                 </p>
               </div>
 

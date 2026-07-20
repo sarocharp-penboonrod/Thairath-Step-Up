@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { 
   INITIAL_DEPARTMENTS, 
   INITIAL_USER, 
-  INITIAL_STEP_LOGS, 
   ACTIVE_WEEKS 
 } from './mockData';
 import { ActiveUser, StepLog, DepartmentInfo } from './types';
@@ -14,15 +13,15 @@ import SettingsPanel from './components/SettingsPanel';
 import HistoryDrawer from './components/HistoryDrawer';
 import LoginView from './components/LoginView';
 import AdminPortalView from './components/AdminPortalView';
-import { LayoutGrid, Eye, Sparkles, Trophy, Calendar, CheckSquare, Cloud, RefreshCw } from 'lucide-react';
+import { LayoutGrid, Trophy, Cloud, RefreshCw } from 'lucide-react';
 import { 
-  getUserProfile, 
   createUserOrUpdateProfile, 
   fetchUserLogs, 
   saveUserLog, 
   deleteUserLog, 
   calculateSheetsLeaderboard 
 } from './sheetsBackend';
+import { getDefaultCampaignMonth } from './campaignConfig';
 
 export default function App() {
   // 1. Core States
@@ -41,10 +40,11 @@ export default function App() {
   const [departments, setDepartments] = useState<DepartmentInfo[]>(INITIAL_DEPARTMENTS);
   const [currentWeek, setCurrentWeek] = useState<number>(() => {
     const saved = localStorage.getItem('thairath_current_week');
-    return saved ? parseInt(saved) : 2;
+    return saved ? parseInt(saved) : getDefaultCampaignMonth();
   });
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const showcaseEnabled = import.meta.env.VITE_ENABLE_SHOWCASE === 'true';
   const [layoutMode, setLayoutMode] = useState<'single' | 'storyboard'>('single');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isAdminMode, setIsAdminMode] = useState<boolean>(() => {
@@ -125,32 +125,41 @@ export default function App() {
       submittedAt: new Date().toISOString()
     };
 
-    setStepLogs(prev => [newLog, ...prev]);
+    const isDuplicate = stepLogs.some((log) =>
+      Number(log.week) === Number(targetWeek) && Number(log.weekOfMonth) === Number(weekOfMonth)
+    );
+    if (isDuplicate) {
+      throw new Error('คุณส่งข้อมูลของเดือนและสัปดาห์นี้แล้ว กรุณาติดต่อ Admin หากต้องการแก้ไข');
+    }
 
-    if (activeUser?.email) {
-      setDbSyncing(true);
-      try {
-        await saveUserLog(activeUser.email, newLog);
-        // Refresh leaderboard after successful save
-        await refreshLeaderboardOnly();
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setDbSyncing(false);
-      }
+    if (!activeUser?.email) {
+      throw new Error('ไม่พบข้อมูลผู้ใช้งาน กรุณาออกจากระบบและเข้าสู่ระบบใหม่');
+    }
+
+    setDbSyncing(true);
+    try {
+      await saveUserLog(activeUser.email, newLog);
+      setStepLogs(prev => [newLog, ...prev]);
+      setActiveUser(prev => ({ ...prev, lastSubmitAt: newLog.submittedAt }));
+      await refreshLeaderboardOnly();
+    } catch (err) {
+      console.error(err);
+      throw err;
+    } finally {
+      setDbSyncing(false);
     }
   };
 
   const handleDeleteLog = async (id: string) => {
     if (window.confirm('คุณต้องการลบรายงานตัวนี้ออกจากการคำนวณจริงในระบบ Google Sheetsหรือไม่?')) {
-      setStepLogs(prev => prev.filter(log => log.id !== id));
-      
       setDbSyncing(true);
       try {
         await deleteUserLog(id);
+        setStepLogs(prev => prev.filter(log => log.id !== id));
         await refreshLeaderboardOnly();
       } catch (err) {
         console.error(err);
+        window.alert('ไม่สามารถลบรายการได้ กรุณาลองใหม่อีกครั้ง');
       } finally {
         setDbSyncing(false);
       }
@@ -181,93 +190,12 @@ export default function App() {
     setStepLogs([]);
   };
 
-  const handleResetAllData = () => {
-    localStorage.removeItem('thairath_active_user');
-    localStorage.removeItem('thairath_step_logs');
-    localStorage.removeItem('thairath_current_week');
-    localStorage.removeItem('thairath_is_logged_in');
-    localStorage.removeItem('thairath_is_admin_mode');
-    setActiveUser(INITIAL_USER);
-    setStepLogs([]);
-    setCurrentWeek(2);
-    setActiveTab('dashboard');
-    setIsLoggedIn(false);
-    setIsAdminMode(false);
-  };
-
-  const handleAutoPopulate = async () => {
-    const seedLogs: StepLog[] = [
-      {
-        id: `fill-1-${Date.now()}`,
-        date: '2026-05-24',
-        steps: 12500,
-        week: 2,
-        imageName: 'auto_screenshot_sun.jpg',
-        imagePreview: 'https://images.unsplash.com/photo-1510017808632-95f08e030633?auto=format&fit=crop&q=80&w=200',
-        submittedAt: new Date().toISOString()
-      },
-      {
-        id: `fill-2-${Date.now()}`,
-        date: '2026-05-25',
-        steps: 12500,
-        week: 2,
-        imageName: 'auto_screenshot_mon.jpg',
-        imagePreview: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&q=80&w=200',
-        submittedAt: new Date().toISOString()
-      },
-      {
-        id: `fill-3-${Date.now()}`,
-        date: '2026-05-26',
-        steps: 12500,
-        week: 2,
-        imageName: 'auto_screenshot_tue.jpg',
-        imagePreview: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&q=80&w=200',
-        submittedAt: new Date().toISOString()
-      },
-      {
-        id: `fill-4-${Date.now()}`,
-        date: '2026-05-27',
-        steps: 12500,
-        week: 2,
-        imageName: 'auto_screenshot_wed.jpg',
-        imagePreview: 'https://images.unsplash.com/photo-1510017808632-95f08e030633?auto=format&fit=crop&q=80&w=200',
-        submittedAt: new Date().toISOString()
-      },
-      {
-        id: `fill-5-${Date.now()}`,
-        date: '2026-05-28',
-        steps: 12500,
-        week: 2,
-        imageName: 'auto_screenshot_thu.jpg',
-        imagePreview: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&q=80&w=200',
-        submittedAt: new Date().toISOString()
-      }
-    ];
-
-    setStepLogs(prev => {
-      const rest = prev.filter(log => log.week !== 2);
-      return [...seedLogs, ...rest];
-    });
-
-    if (activeUser?.email) {
-      setDbSyncing(true);
-      try {
-        for (const log of seedLogs) {
-          await saveUserLog(activeUser.email, log);
-        }
-        await refreshLeaderboardOnly();
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setDbSyncing(false);
-      }
-    }
-  };
 
   return (
     <div className="min-h-screen bg-[#F2F4F7] text-[#344054] font-sans overflow-x-hidden pb-12">
       
-      {/* Dynamic Sandbox Layout Toggler */}
+      {/* Optional showcase controls. Hidden in production unless VITE_ENABLE_SHOWCASE=true. */}
+      {showcaseEnabled && (
       <div className="bg-[#000000] text-white py-2.5 px-4 sticky top-0 z-50 shadow-xs">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs md:text-sm font-semibold">
           <div className="flex items-center gap-2">
@@ -303,7 +231,7 @@ export default function App() {
             {dbSyncing && (
               <span className="flex items-center gap-1 text-[11px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20 animate-pulse font-mono">
                 <RefreshCw className="w-3 h-3 animate-spin text-emerald-400" />
-                FIRESTORE SYNCING...
+                SHEETS SYNCING...
               </span>
             )}
             <span className="text-[11px] bg-emerald-900/40 text-emerald-300 px-2.5 py-0.5 rounded border border-emerald-500/30 font-extrabold flex items-center gap-1.5 uppercase font-mono">
@@ -313,17 +241,15 @@ export default function App() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Render Main App Header */}
-      {layoutMode === 'single' && isLoggedIn && !isAdminMode ? (
+      {(!showcaseEnabled || layoutMode === 'single') && isLoggedIn && !isAdminMode ? (
         <Header 
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           activeUser={activeUser}
           departments={departments}
-          currentWeek={currentWeek}
-          weeks={ACTIVE_WEEKS}
-          setCurrentWeek={setCurrentWeek}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onLogout={handleLogout}
           onOpenAdmin={() => setIsAdminMode(true)}
@@ -363,7 +289,7 @@ export default function App() {
             </div>
           )}
 
-          {layoutMode === 'single' ? (
+          {!showcaseEnabled || layoutMode === 'single' ? (
           
           /* ------------------- INTERACTIVE MODE ------------------- */
           <div className="space-y-6">
@@ -384,7 +310,7 @@ export default function App() {
               <SubmissionView 
                 activeUser={activeUser}
                 currentWeek={currentWeek}
-                weeks={ACTIVE_WEEKS}
+                stepLogs={stepLogs}
                 onAddLog={handleAddLog}
                 setActiveTab={setActiveTab}
               />
@@ -394,6 +320,7 @@ export default function App() {
               <LeaderboardView 
                 departments={departments}
                 activeUser={activeUser}
+                currentMonth={currentWeek}
               />
             )}
           </div>
@@ -491,7 +418,7 @@ export default function App() {
                   <SubmissionView 
                     activeUser={activeUser}
                     currentWeek={currentWeek}
-                    weeks={ACTIVE_WEEKS}
+                    stepLogs={stepLogs}
                     onAddLog={handleAddLog}
                     setActiveTab={setActiveTab}
                   />
@@ -522,6 +449,7 @@ export default function App() {
                   <LeaderboardView 
                     departments={departments}
                     activeUser={activeUser}
+                    currentMonth={currentWeek}
                   />
                 </div>
               </div>
@@ -541,11 +469,6 @@ export default function App() {
         activeUser={activeUser}
         setActiveUser={handleUpdateActiveUser}
         departments={departments}
-        resetAllData={handleResetAllData}
-        onAutoPopulate={handleAutoPopulate}
-        currentWeek={currentWeek}
-        weeks={ACTIVE_WEEKS}
-        setCurrentWeek={setCurrentWeek}
       />
 
       <HistoryDrawer 

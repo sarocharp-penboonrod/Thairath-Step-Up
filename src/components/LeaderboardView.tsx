@@ -1,18 +1,20 @@
 import React, { useState, useMemo } from 'react';
-import { Award, ChevronUp, ChevronDown, Minus, Search, RefreshCw, Trophy, Target, Lightbulb, Star } from 'lucide-react';
+import { ChevronUp, ChevronDown, Minus, Search, RefreshCw, Trophy, Lightbulb, Star } from 'lucide-react';
 import { DepartmentInfo, ActiveUser } from '../types';
+import { getCampaignMonth } from '../campaignConfig';
 
 interface LeaderboardViewProps {
   departments: DepartmentInfo[];
   activeUser: ActiveUser;
+  currentMonth: number;
 }
 
 export default function LeaderboardView({
   departments,
-  activeUser
+  activeUser,
+  currentMonth
 }: LeaderboardViewProps) {
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [sortBy, setSortBy] = useState<'steps' | 'participation'>('steps');
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // Trigger brief load effect for premium feel
@@ -37,15 +39,9 @@ export default function LeaderboardView({
       );
     }
 
-    // Sort accordingly
-    if (sortBy === 'steps') {
-      list.sort((a, b) => b.averageStepsPerPerson - a.averageStepsPerPerson);
-    } else {
-      list.sort((a, b) => b.participationRate - a.participationRate);
-    }
-
+    list.sort((a, b) => b.averageStepsPerPerson - a.averageStepsPerPerson);
     return list;
-  }, [departments, searchTerm, sortBy]);
+  }, [departments, searchTerm]);
 
   // Find user's active department's rank
   const activeUserRankIndex = useMemo(() => {
@@ -58,7 +54,7 @@ export default function LeaderboardView({
   // Gamified insight message
   const challengeInsight = useMemo(() => {
     if (activeUserRankIndex === 1) {
-      return 'สุดยอดมาก! ฝ่ายของคุณกำลังครองอันดับ 1 ในตารางท้าทายสัปดาห์นี้ เดินขยับเพิ่มความโปรดักทีฟต่อไป';
+      return 'สุดยอดมาก! ฝ่ายของคุณกำลังครองอันดับ 1 ในตารางท้าทายของเดือนนี้ เดินขยับเพิ่มความโปรดักทีฟต่อไป';
     }
     
     // Find department right above user's
@@ -67,9 +63,9 @@ export default function LeaderboardView({
     if (targetRankIndex > 0 && targetRankIndex <= list.length) {
       const aboveDept = list[targetRankIndex - 1];
       const gapSteps = aboveDept.averageStepsPerPerson - (activeUserDept?.averageStepsPerPerson || 0);
-      return `อีกขาดเพียงประมาณ ${Math.max(10, Math.round(gapSteps))} ก้าวเฉลี่ยต่อคน แผนกของคุณจะสามารถขึ้นไปแซงอันดับอยู่อย่าง "${aboveDept.nameTh}"! 🚀`;
+      return `อีกเพียงประมาณ ${Math.max(10, Math.round(gapSteps)).toLocaleString()} ก้าวเฉลี่ยต่อผู้เข้าร่วม แผนกของคุณจะสามารถขึ้นไปแซงอันดับอยู่อย่าง "${aboveDept.nameTh}"! 🚀`;
     }
-    return 'พยายามชวนเพื่อนร่วมงานส่งผลเพิ่มขึ้นเพื่อดันก้าวเฉลี่ยสะสมด่วน!';
+    return 'ชวนเพื่อนร่วมงานส่งผลให้ครบ เพื่อเพิ่มทั้งก้าวเฉลี่ยและอัตราการมีส่วนร่วมของทีม';
   }, [activeUserRankIndex, departments, activeUserDept]);
 
   return (
@@ -82,7 +78,7 @@ export default function LeaderboardView({
             อันดับของแต่ละหน่วยงาน
           </h2>
           <p className="text-xs md:text-sm text-[#344054] font-medium mt-1">
-            การจัดอันดับคำนวณจากก้าวเฉลี่ยของสมาชิกทุกคนในฝ่าย
+            การจัดอันดับคำนวณจากก้าวเฉลี่ยของผู้เข้าร่วมในเดือนที่เลือก
           </p>
         </div>
         
@@ -92,7 +88,7 @@ export default function LeaderboardView({
           className="flex items-center gap-2 bg-[#F2F4F7] hover:bg-gray-200 text-[#344054] font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer self-start md:self-auto"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span>เชื่อมต่อเซิร์ฟเวอร์ Thairath Health | เรียลไทม์วันนี้</span>
+          <span>ข้อมูลเดือน{getCampaignMonth(currentMonth).label} · Google Sheets Live</span>
         </button>
       </div>
 
@@ -138,7 +134,7 @@ export default function LeaderboardView({
               <tr className="bg-gray-50 border-b-2 border-gray-100 text-[#344054] font-bold text-xs md:text-sm">
                 <th width="100" className="py-4 px-6 text-center">อันดับ</th>
                 <th className="py-4 px-4 text-left">ฝ่าย / แผนก</th>
-                <th width="220" className="py-4 px-4 text-right">ก้าวเฉลี่ยรายคน / วัน</th>
+                <th width="220" className="py-4 px-4 text-right">ก้าวเฉลี่ยต่อผู้เข้าร่วม</th>
                 <th width="180" className="py-4 px-6 text-center">สถานะทีม</th>
               </tr>
             </thead>

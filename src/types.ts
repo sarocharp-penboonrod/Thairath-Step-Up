@@ -2,8 +2,8 @@ export interface StepLog {
   id: string;
   date: string; // YYYY-MM-DD
   steps: number;
-  week: number; // represents Month index (1 to 6) or historical week sequence
-  weekOfMonth?: number; // 1 to 4 inside those months
+  week: number; // campaign month index (1 to 6)
+  weekOfMonth?: number; // submission week within the selected month (1 to 5)
   imageName: string;
   imagePreview?: string;
   submittedAt: string;
@@ -32,6 +32,7 @@ export interface ActiveUser {
   age?: number;
   dateOfBirth?: string; // YYYY-MM-DD, used by Google Sheets backend to calculate age and birthdate password
   lastLoginAt?: string; // ISO timestamp from Google Sheets backend
+  lastSubmitAt?: string; // ISO timestamp of the latest successful step submission
 }
 
 

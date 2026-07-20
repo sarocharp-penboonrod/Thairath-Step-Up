@@ -1,51 +1,99 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Users, 
-  ShieldAlert, 
-  Search, 
-  Trash2, 
-  Ticket, 
-  Calendar, 
-  Building, 
-  CheckCircle, 
-  RefreshCw, 
-  ArrowLeft, 
-  FileSpreadsheet, 
-  UserPlus, 
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  Building,
+  CalendarDays,
+  CheckCircle2,
+  Download,
   ExternalLink,
-  ShieldCheck,
-  Coins,
+  FileSpreadsheet,
+  Footprints,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Ticket,
+  Trash2,
   Trophy,
-  Download
+  UserPlus,
+  Users,
+  UserX
 } from 'lucide-react';
-import { 
-  fetchAllUsers, 
-  fetchAllStepLogs, 
-  deleteUserLog, 
+import {
   createUserOrUpdateProfile,
-  updateUserTickets 
+  deleteUserLog,
+  fetchAllStepLogs,
+  fetchAllUsers,
+  updateUserTickets
 } from '../sheetsBackend';
-import { DepartmentInfo, ActiveUser } from '../types';
+import { ActiveUser, DepartmentInfo, StepLog } from '../types';
+import { CAMPAIGN_MONTHS, getDefaultCampaignMonth, getCampaignMonth } from '../campaignConfig';
 
 interface AdminPortalViewProps {
   departments: DepartmentInfo[];
   onExit: () => void;
 }
 
+interface AdminUser extends ActiveUser {
+  id?: string;
+  status?: string;
+  rawDepartmentId?: string;
+  departmentName?: string;
+}
+
+interface AdminLog extends StepLog {
+  userEmail: string;
+  employeeId?: string;
+}
+
+const DATABASE_URL = 'https://docs.google.com/spreadsheets/d/1YgxxKpP74EkzfzAJn2wnTXamrYJ9-aBZsKwcBo7v3Dk/edit';
+
+function normalizeText(value?: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeDeptKey(value?: string): string {
+  return normalizeText(value).replace(/^ฝ่าย\s*/i, '').replace(/\s+/g, ' ');
+}
+
+function getDisplayName(user?: Pick<AdminUser, 'name' | 'surname' | 'Surename'> | null): string {
+  if (!user) return '';
+  const name = String(user.name || '').trim();
+  const surname = String(user.surname || user.Surename || '').trim();
+  if (!surname || normalizeText(name).endsWith(normalizeText(surname))) return name;
+  return [name, surname].filter(Boolean).join(' ');
+}
+
+function csvCell(value: unknown): string {
+  const text = String(value ?? '').replace(/"/g, '""');
+  return `"${text}"`;
+}
+
+function downloadCsv(filename: string, rows: string[][]) {
+  const content = `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\n')}`;
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export default function AdminPortalView({ departments, onExit }: AdminPortalViewProps) {
-  const [users, setUsers] = useState<any[]>([]);
-  const [logs, setLogs] = useState<any[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [logs, setLogs] = useState<AdminLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeSubTab, setActiveSubTab] = useState<'employees' | 'submissions' | 'leaderboard'>('employees');
-  
-  // Filtering & Search states
+
+  const [reportMonthFilter, setReportMonthFilter] = useState(String(getDefaultCampaignMonth()));
+  const [reportWeekFilter, setReportWeekFilter] = useState('all');
   const [userSearchText, setUserSearchText] = useState('');
   const [userDeptFilter, setUserDeptFilter] = useState('all');
-  
   const [logSearchText, setLogSearchText] = useState('');
-  const [logWeekFilter, setLogWeekFilter] = useState('all');
 
-  // New employee inline form
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [newEmpId, setNewEmpId] = useState('');
   const [newEmpName, setNewEmpName] = useState('');
@@ -56,21 +104,20 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
   const [newEmpError, setNewEmpError] = useState('');
   const [isSavingUser, setIsSavingUser] = useState(false);
 
-  // Ticket Adjust Modal states
-  const [adjustingUser, setAdjustingUser] = useState<any | null>(null);
-  const [ticketDelta, setTicketDelta] = useState<number>(1);
+  const [adjustingUser, setAdjustingUser] = useState<AdminUser | null>(null);
+  const [ticketDelta, setTicketDelta] = useState(1);
   const [isUpdatingTickets, setIsUpdatingTickets] = useState(false);
 
-  // Load all system data
   const loadAdminData = async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
-      const allUsers = await fetchAllUsers();
-      const allLogs = await fetchAllStepLogs();
-      setUsers(allUsers);
-      setLogs(allLogs);
-    } catch (err) {
-      console.error('Error loading admin data:', err);
+      const [allUsers, allLogs] = await Promise.all([fetchAllUsers(), fetchAllStepLogs()]);
+      setUsers(allUsers as AdminUser[]);
+      setLogs(allLogs as AdminLog[]);
+    } catch (error: any) {
+      console.error('Error loading admin data:', error);
+      setLoadError(error?.message || 'ไม่สามารถโหลดข้อมูลจาก Google Sheets ได้');
     } finally {
       setIsLoading(false);
     }
@@ -80,32 +127,25 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
     loadAdminData();
   }, []);
 
-  const normalizeDeptKey = (value?: string) =>
-    String(value || '').trim().toLowerCase().replace(/^ฝ่าย\s*/i, '').replace(/\s+/g, ' ');
+  const allDepartments = useMemo<DepartmentInfo[]>(() => {
+    const departmentMap = new Map<string, DepartmentInfo>();
 
-  const allDepartments = React.useMemo<DepartmentInfo[]>(() => {
-    const deptMap = new Map<string, DepartmentInfo>();
+    departments.forEach((department) => {
+      if (department?.id) departmentMap.set(normalizeDeptKey(department.id), department);
+    });
 
-    const addDept = (dept: DepartmentInfo) => {
-      if (!dept?.id) return;
-      deptMap.set(dept.id, dept);
-    };
-
-    departments.forEach(addDept);
-
-    users.forEach((u) => {
-      const rawDept = String(u.departmentId || u.departmentName || u.rawDepartmentId || '').trim();
-      if (!rawDept) return;
-
-      const matched = Array.from(deptMap.values()).find((d) =>
-        [d.id, d.nameTh, d.nameEn].some((value) => normalizeDeptKey(value) === normalizeDeptKey(rawDept))
+    users.forEach((user) => {
+      const rawDepartment = String(user.departmentId || user.departmentName || user.rawDepartmentId || '').trim();
+      if (!rawDepartment) return;
+      const key = normalizeDeptKey(rawDepartment);
+      const existing = Array.from(departmentMap.values()).find((department) =>
+        [department.id, department.nameTh, department.nameEn].some((value) => normalizeDeptKey(value) === key)
       );
-
-      if (!matched) {
-        deptMap.set(rawDept, {
-          id: rawDept,
-          nameTh: String(u.departmentName || rawDept),
-          nameEn: String(u.departmentName || rawDept),
+      if (!existing) {
+        departmentMap.set(key, {
+          id: rawDepartment,
+          nameTh: user.departmentName || rawDepartment,
+          nameEn: user.departmentName || rawDepartment,
           participationRate: 0,
           averageStepsPerPerson: 0,
           status: 'stable',
@@ -114,31 +154,41 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
       }
     });
 
-    return Array.from(deptMap.values());
+    return Array.from(departmentMap.values()).sort((a, b) => a.nameTh.localeCompare(b.nameTh, 'th'));
   }, [departments, users]);
+
+  useEffect(() => {
+    if (!newEmpDept && allDepartments[0]?.id) setNewEmpDept(allDepartments[0].id);
+  }, [allDepartments, newEmpDept]);
 
   const resolveDepartment = (departmentId?: string) => {
     const key = normalizeDeptKey(departmentId);
     if (!key) return null;
-    return allDepartments.find((d) =>
-      [d.id, d.nameTh, d.nameEn].some((value) => normalizeDeptKey(value) === key)
+    return allDepartments.find((department) =>
+      [department.id, department.nameTh, department.nameEn].some((value) => normalizeDeptKey(value) === key)
     ) || null;
   };
 
   const isSameDepartment = (departmentId?: string, filterDepartmentId?: string) => {
     if (!filterDepartmentId || filterDepartmentId === 'all') return true;
-    const userDept = resolveDepartment(departmentId);
-    const filterDept = resolveDepartment(filterDepartmentId);
-    return normalizeDeptKey(userDept?.id || departmentId) === normalizeDeptKey(filterDept?.id || filterDepartmentId);
+    const userDepartment = resolveDepartment(departmentId);
+    const filterDepartment = resolveDepartment(filterDepartmentId);
+    return normalizeDeptKey(userDepartment?.id || departmentId) === normalizeDeptKey(filterDepartment?.id || filterDepartmentId);
   };
 
-  const formatDateTime = (value?: string) => {
-    if (!value) return 'ยังไม่เคย Login';
+  const findUserForLog = (log: AdminLog) => users.find((user) => {
+    const employeeMatches = log.employeeId && normalizeText(user.employeeId) === normalizeText(log.employeeId);
+    const emailMatches = log.userEmail && normalizeText(user.email) === normalizeText(log.userEmail);
+    return employeeMatches || emailMatches;
+  });
+
+  const formatDateTime = (value?: string, emptyText = 'ยังไม่มีข้อมูล') => {
+    if (!value) return emptyText;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleString('th-TH', {
       year: 'numeric',
-      month: '2-digit',
+      month: 'short',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
@@ -146,53 +196,118 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
     });
   };
 
-  // Delete Log handler
+  const logsInSelectedPeriod = useMemo(() => logs.filter((log) => {
+    const matchesMonth = reportMonthFilter === 'all' || Number(log.week) === Number(reportMonthFilter);
+    const matchesWeek = reportWeekFilter === 'all' || Number(log.weekOfMonth) === Number(reportWeekFilter);
+    return matchesMonth && matchesWeek;
+  }), [logs, reportMonthFilter, reportWeekFilter]);
+
+  const latestSubmitByEmployee = useMemo(() => {
+    const result = new Map<string, string>();
+    logs.forEach((log) => {
+      const key = normalizeText(log.employeeId || log.userEmail);
+      const current = result.get(key);
+      if (!current || String(log.submittedAt || '') > current) result.set(key, String(log.submittedAt || ''));
+    });
+    return result;
+  }, [logs]);
+
+  const activeUsers = users.filter((user) => normalizeText(user.status || 'Active') === 'active');
+  const participantKeys = new Set(logsInSelectedPeriod.map((log) => normalizeText(log.employeeId || log.userEmail)).filter(Boolean));
+  const submittedEmployees = activeUsers.filter((user) =>
+    participantKeys.has(normalizeText(user.employeeId)) || participantKeys.has(normalizeText(user.email))
+  ).length;
+  const notSubmittedEmployees = Math.max(0, activeUsers.length - submittedEmployees);
+  const participationRate = activeUsers.length > 0 ? Math.round((submittedEmployees / activeUsers.length) * 100) : 0;
+  const scopedTotalSteps = logsInSelectedPeriod.reduce((sum, log) => sum + (Number(log.steps) || 0), 0);
+
+  const filteredUsers = users.filter((user) => {
+    const search = normalizeText(userSearchText);
+    const fullName = getDisplayName(user);
+    const matchesSearch = !search || [fullName, user.nickname, user.employeeId, user.email]
+      .some((value) => normalizeText(value).includes(search));
+    return matchesSearch && isSameDepartment(user.departmentId, userDeptFilter);
+  });
+
+  const filteredLogs = logsInSelectedPeriod.filter((log) => {
+    const search = normalizeText(logSearchText);
+    if (!search) return true;
+    const user = findUserForLog(log);
+    return [
+      log.userEmail,
+      log.employeeId,
+      log.imageName,
+      user?.name,
+      user?.nickname,
+      user?.employeeId
+    ].some((value) => normalizeText(value).includes(search));
+  });
+
+  const departmentLeaderboard = useMemo(() => allDepartments.map((department) => {
+    const departmentUsers = activeUsers.filter((user) => isSameDepartment(user.departmentId, department.id));
+    const departmentUserKeys = new Set(departmentUsers.flatMap((user) => [normalizeText(user.employeeId), normalizeText(user.email)]));
+    const departmentLogs = logsInSelectedPeriod.filter((log) =>
+      departmentUserKeys.has(normalizeText(log.employeeId)) || departmentUserKeys.has(normalizeText(log.userEmail))
+    );
+    const participants = new Set(departmentLogs.map((log) => normalizeText(log.employeeId || log.userEmail))).size;
+    const totalSteps = departmentLogs.reduce((sum, log) => sum + (Number(log.steps) || 0), 0);
+    const rate = departmentUsers.length > 0 ? Math.round((participants / departmentUsers.length) * 100) : 0;
+
+    return {
+      ...department,
+      memberCount: departmentUsers.length,
+      participantCount: participants,
+      participationRate: rate,
+      totalSteps,
+      averageSteps: participants > 0 ? Math.round(totalSteps / participants) : 0
+    };
+  }).filter((department) => department.memberCount > 0).sort((a, b) => b.totalSteps - a.totalSteps), [allDepartments, activeUsers, logsInSelectedPeriod]);
+
+  const topWalkers = useMemo(() => {
+    const totals = new Map<string, number>();
+    logsInSelectedPeriod.forEach((log) => {
+      const key = normalizeText(log.employeeId || log.userEmail);
+      totals.set(key, (totals.get(key) || 0) + (Number(log.steps) || 0));
+    });
+
+    return Array.from(totals.entries())
+      .map(([key, steps]) => {
+        const user = users.find((item) => normalizeText(item.employeeId) === key || normalizeText(item.email) === key);
+        return { user, steps };
+      })
+      .filter((item) => item.user)
+      .sort((a, b) => b.steps - a.steps)
+      .slice(0, 10);
+  }, [logsInSelectedPeriod, users]);
+
+  const selectedPeriodLabel = reportMonthFilter === 'all'
+    ? 'ทั้งโครงการ'
+    : `${getCampaignMonth(Number(reportMonthFilter)).label}${reportWeekFilter === 'all' ? '' : ` · สัปดาห์ที่ ${reportWeekFilter}`}`;
+
   const handleDeleteLogClick = async (logId: string) => {
-    if (window.confirm('คุณแน่ใจหรือไม่ที่จะลบรายการก้าวตัวนี้? ข้อมูลนี้จะหายไปจากสถิติ Leaderboard และไม่สามารถกู้คืนได้')) {
-      try {
-        await deleteUserLog(logId);
-        setLogs(prev => prev.filter(l => l.id !== logId));
-        // Force refresh leaderboard calculation on next load
-      } catch (err) {
-        alert('เกิดข้อผิดพลาดในการลบ: ' + err);
-      }
+    if (!window.confirm('ยืนยันลบรายการนี้? ข้อมูลจะถูกนำออกจาก Dashboard และ Leaderboard และไม่สามารถกู้คืนได้')) return;
+    try {
+      await deleteUserLog(logId);
+      setLogs((previous) => previous.filter((log) => log.id !== logId));
+    } catch (error: any) {
+      window.alert(error?.message || 'ไม่สามารถลบรายการได้');
     }
   };
 
-  // Add new employee manual
-  const handleAddUserSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddUserSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setNewEmpError('');
-
     const formattedId = newEmpId.trim();
-    if (formattedId.length !== 6 || !/^\d+$/.test(formattedId)) {
-      setNewEmpError('รหัสพนักงานต้องเป็นตัวเลข 6 หลัก');
-      return;
-    }
 
-    if (!newEmpName.trim()) {
-      setNewEmpError('กรุณากรอกชื่อจริง');
-      return;
-    }
-
-    if (!newEmpSurname.trim()) {
-      setNewEmpError('กรุณากรอกนามสกุลจริง');
-      return;
-    }
-
-    if (!newEmpNickname.trim()) {
-      setNewEmpError('กรุณากรอกชื่อเล่น');
-      return;
-    }
-
-    if (!newEmpBirthDate) {
-      setNewEmpError('กรุณาระบุวันเกิด เพื่อให้ระบบคำนวณอายุและสร้างรหัสผ่านวันเกิดอัตโนมัติ');
-      return;
-    }
+    if (!/^\d{6}$/.test(formattedId)) return setNewEmpError('รหัสพนักงานต้องเป็นตัวเลข 6 หลัก');
+    if (!newEmpName.trim()) return setNewEmpError('กรุณากรอกชื่อจริง');
+    if (!newEmpSurname.trim()) return setNewEmpError('กรุณากรอกนามสกุล');
+    if (!newEmpNickname.trim()) return setNewEmpError('กรุณากรอกชื่อเล่น');
+    if (!newEmpBirthDate) return setNewEmpError('กรุณาระบุวันเกิด เพื่อคำนวณอายุและสร้างรหัสผ่านอัตโนมัติ');
 
     setIsSavingUser(true);
     try {
-      const newUserObj: ActiveUser = {
+      const newUser: ActiveUser = {
         employeeId: formattedId,
         email: `${formattedId}@thairathgroup.com`,
         name: newEmpName.trim(),
@@ -200,13 +315,10 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
         nickname: newEmpNickname.trim(),
         departmentId: newEmpDept,
         weekTarget: 60000,
-        totalTickets: 2, // starting free tickets
+        totalTickets: 0,
         dateOfBirth: newEmpBirthDate
       };
-
-      await createUserOrUpdateProfile(formattedId, newUserObj);
-      
-      // Reset & load again
+      await createUserOrUpdateProfile(formattedId, newUser);
       setNewEmpId('');
       setNewEmpName('');
       setNewEmpSurname('');
@@ -214,385 +326,199 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
       setNewEmpBirthDate('');
       setShowAddUserModal(false);
       await loadAdminData();
-    } catch (err: any) {
-      setNewEmpError('เกิดปัญหากับระบบ Google Sheets: ' + err.message);
+    } catch (error: any) {
+      setNewEmpError(error?.message || 'ไม่สามารถบันทึกข้อมูลพนักงานได้');
     } finally {
       setIsSavingUser(false);
     }
   };
 
-  // Ticket Adjust Submit
   const handleUpdateTickets = async () => {
-    if (!adjustingUser) return;
+    if (!adjustingUser?.employeeId) return;
     setIsUpdatingTickets(true);
     try {
-      const newTicketCount = Math.max(0, adjustingUser.totalTickets + ticketDelta);
-      await updateUserTickets(adjustingUser.employeeId || adjustingUser.id, newTicketCount);
-      
-      // Update local state
-      setUsers(prev => prev.map(u => u.id === adjustingUser.id ? { ...u, totalTickets: newTicketCount } : u));
+      const newTicketCount = Math.max(0, Number(adjustingUser.totalTickets || 0) + ticketDelta);
+      await updateUserTickets(adjustingUser.employeeId, newTicketCount);
+      setUsers((previous) => previous.map((user) =>
+        user.employeeId === adjustingUser.employeeId ? { ...user, totalTickets: newTicketCount } : user
+      ));
       setAdjustingUser(null);
-    } catch (err) {
-      alert('เกิดข้อผิดพลาดในการอัปเดตตั๋วทอง: ' + err);
+    } catch (error: any) {
+      window.alert(error?.message || 'ไม่สามารถปรับจำนวนตั๋วได้');
     } finally {
       setIsUpdatingTickets(false);
     }
   };
 
-  // Excel Export Handler (CSV with BOM for Thai Excel Support)
-  const handleExportToExcel = (type: 'employees' | 'submissions') => {
-    let csvContent = "\uFEFF"; // UTF-8 BOM so Excel opens it with correct Thai encoding!
-    let filename = "";
-
-    if (type === 'employees') {
-      csvContent += "รหัสพนักงาน,ชื่อ-นามสกุลจริง,ชื่อเล่น,ฝ่าย/แผนกงานย่อย,รหัสผ่าน(วันเกิดพ.ศ.),Login ล่าสุด,ตั๋วทองจับฉลากวิเศษ\n";
-      users.forEach(u => {
-        const dept = resolveDepartment(u.departmentId);
-        const deptName = dept ? dept.nameTh : 'ไม่ระบุ';
-        const cleanName = ([u.name, u.surname || u.Surename].filter(Boolean).join(' ') || '').replace(/,/g, ' ');
-        const cleanNickname = (u.nickname || '').replace(/,/g, ' ');
-        csvContent += `${u.employeeId || ''},${cleanName},${cleanNickname},${deptName},${u.password || ''},${formatDateTime(u.lastLoginAt)},${u.totalTickets || 0}\n`; 
-      });
-      filename = `thairath_employees_database_${new Date().toISOString().slice(0, 10)}.csv`;
-    } else {
-      csvContent += "สัปดาห์,รหัสพนักงาน,ชื่อพนักงาน,ฝ่าย,วันทำกิจกรรม,จำนวนก้าว,ชื่อไฟล์รูปภาพหลักฐาน,เวลาส่งบันทึก\n";
-      logs.forEach(l => {
-        const userProfile = users.find(u => u.email.toLowerCase() === l.userEmail.toLowerCase());
-        const empId = userProfile ? userProfile.employeeId : '';
-        const empName = userProfile ? userProfile.name.replace(/,/g, ' ') : '';
-        const dept = userProfile ? resolveDepartment(userProfile.departmentId) : null;
-        const deptName = dept ? dept.nameTh : 'ไม่ระบุ';
-        const cleanImgName = (l.imageName || '').replace(/,/g, ' ');
-        const formattedDate = new Date(l.submittedAt).toLocaleString('th-TH', { hour12: false }).replace(/,/g, ' ');
-        csvContent += `${l.week},${empId},${empName},${deptName},${l.date},${l.steps},${cleanImgName},${formattedDate}\n`;
-      });
-      filename = `thairath_step_logs_history_${new Date().toISOString().slice(0, 10)}.csv`;
-    }
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const exportEmployees = () => {
+    const rows = [
+      ['รหัสพนักงาน', 'ชื่อ-นามสกุล', 'ชื่อเล่น', 'ฝ่าย', 'อายุ', 'Login ล่าสุด', 'ส่งผลล่าสุด', 'ตั๋วสะสม', 'สถานะ'],
+      ...filteredUsers.map((user) => [
+        user.employeeId || '',
+        getDisplayName(user),
+        user.nickname || '',
+        resolveDepartment(user.departmentId)?.nameTh || user.departmentId || 'ไม่ระบุฝ่าย',
+        user.age || '',
+        formatDateTime(user.lastLoginAt),
+        formatDateTime(user.lastSubmitAt || latestSubmitByEmployee.get(normalizeText(user.employeeId)) || latestSubmitByEmployee.get(normalizeText(user.email))),
+        user.totalTickets || 0,
+        user.status || 'Active'
+      ])
+    ];
+    downloadCsv(`thairath_step_up_employees_${new Date().toISOString().slice(0, 10)}.csv`, rows);
   };
 
-  // Calculations for stats
-  const totalEmployees = users.length;
-  const totalLogsCount = logs.length;
-  const totalStepsSum = logs.reduce((sum, log) => sum + log.steps, 0);
-  const averageSteps = totalLogsCount > 0 ? Math.round(totalStepsSum / totalLogsCount) : 0;
+  const exportSubmissions = () => {
+    const rows = [
+      ['เดือน', 'สัปดาห์', 'รหัสพนักงาน', 'ชื่อพนักงาน', 'ฝ่าย', 'วันที่อ้างอิง', 'จำนวนก้าว', 'ไฟล์หลักฐาน', 'เวลาที่ส่ง'],
+      ...filteredLogs.map((log) => {
+        const user = findUserForLog(log);
+        return [
+          getCampaignMonth(Number(log.week)).label,
+          log.weekOfMonth ? `สัปดาห์ที่ ${log.weekOfMonth}` : 'ข้อมูลเดิม',
+          user?.employeeId || log.employeeId || '',
+          getDisplayName(user),
+          resolveDepartment(user?.departmentId)?.nameTh || user?.departmentId || 'ไม่ระบุฝ่าย',
+          log.date,
+          log.steps,
+          log.imageName,
+          formatDateTime(log.submittedAt)
+        ];
+      })
+    ];
+    downloadCsv(`thairath_step_up_submissions_${new Date().toISOString().slice(0, 10)}.csv`, rows);
+  };
 
-  // Compute department leaderboard for Admin
-  const adminDeptLeaderboard = allDepartments.map((d) => {
-    // Find all users in this department
-    const deptUsers = users.filter(u => isSameDepartment(u.departmentId, d.id));
-    const deptUserEmails = deptUsers.map(u => u.email?.toLowerCase() || `${u.employeeId}@thairathgroup.com`.toLowerCase());
-    
-    // Total steps submitted by these users
-    const totalSteps = logs
-      .filter(l => deptUserEmails.includes(l.userEmail.toLowerCase()))
-      .reduce((sum, l) => sum + l.steps, 0);
-      
-    // Total tickets in this department
-    const totalTickets = deptUsers.reduce((sum, u) => sum + (u.totalTickets || 0), 0);
-    
-    return {
-      id: d.id,
-      nameTh: d.nameTh,
-      nameEn: d.nameEn,
-      memberCount: deptUsers.length,
-      totalSteps,
-      totalTickets
-    };
-  }).sort((a, b) => b.totalSteps - a.totalSteps);
-
-  // Top 10 users with the most tickets
-  const top10TicketUsers = [...users]
-    .sort((a, b) => (b.totalTickets || 0) - (a.totalTickets || 0))
-    .slice(0, 10);
-
-  // Filtered Users
-  const filteredUsers = users.filter(u => {
-    const matchesSearch = 
-      String(u.name || '').toLowerCase().includes(userSearchText.toLowerCase()) ||
-      String(u.nickname || '').toLowerCase().includes(userSearchText.toLowerCase()) ||
-      String(u.employeeId || '').includes(userSearchText) ||
-      String(u.email || '').toLowerCase().includes(userSearchText.toLowerCase());
-    
-    const matchesDept = isSameDepartment(u.departmentId, userDeptFilter);
-    return matchesSearch && matchesDept;
-  });
-
-  // Filtered Logs
-  const filteredLogs = logs.filter(l => {
-    const userProfile = users.find(u => u.email.toLowerCase() === l.userEmail.toLowerCase());
-    const userNameString = userProfile ? `${userProfile.name} ${userProfile.nickname}` : '';
-    
-    const matchesSearch = 
-      l.userEmail.toLowerCase().includes(logSearchText.toLowerCase()) ||
-      userNameString.toLowerCase().includes(logSearchText.toLowerCase()) ||
-      l.imageName.toLowerCase().includes(logSearchText.toLowerCase());
-
-    const matchesWeek = logWeekFilter === 'all' || l.week.toString() === logWeekFilter;
-    return matchesSearch && matchesWeek;
-  });
+  const metricCards = [
+    { label: 'พนักงาน Active', value: activeUsers.length, suffix: 'คน', helper: 'ฐานพนักงานที่เปิดใช้งาน', icon: Users, className: 'bg-emerald-50 text-[#00914E]' },
+    { label: 'ส่งผลแล้ว', value: submittedEmployees, suffix: 'คน', helper: selectedPeriodLabel, icon: CheckCircle2, className: 'bg-blue-50 text-blue-600' },
+    { label: 'ยังไม่ส่งผล', value: notSubmittedEmployees, suffix: 'คน', helper: 'เทียบกับพนักงาน Active', icon: UserX, className: 'bg-rose-50 text-rose-600' },
+    { label: 'Participation Rate', value: participationRate, suffix: '%', helper: `${scopedTotalSteps.toLocaleString()} ก้าวในช่วงที่เลือก`, icon: Footprints, className: 'bg-amber-50 text-amber-600' }
+  ];
 
   return (
     <div className="min-h-screen bg-[#F2F4F7] text-[#344054] font-sans pb-24">
-      
-      {/* Editorial Header Block for Admin */}
-      <div className="bg-black text-white py-4.5 px-6 shadow-md">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+      <header className="bg-black text-white py-4 px-5 shadow-md">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-[#00914E] text-white p-2 rounded-xl">
-              <ShieldAlert className="w-5 h-5" />
-            </div>
+            <div className="bg-[#00914E] text-white p-2.5 rounded-xl"><ShieldAlert className="w-5 h-5" /></div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-black tracking-tight text-white leading-none">THAIRATH STEP UP - หลังบ้าน (Admin System)</h1>
-                <span className="text-[10px] bg-red-600 text-white font-extrabold px-1.5 py-0.5 rounded uppercase font-mono animate-pulse">
-                  Console
-                </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base md:text-lg font-black tracking-tight">THAIRATH STEP UP · Admin Center</h1>
+                <span className="text-[9px] bg-[#00914E] text-white font-extrabold px-2 py-0.5 rounded uppercase tracking-wider">Google Sheets Live</span>
               </div>
-              <p className="text-[11px] text-gray-300 font-medium mt-1">ยินดีต้อนรับ คุณวรพงษ์ (เบ) • จัดการระบบข้อมูลก้าวพนักงานไทยรัฐอย่างเป็นส่วนตัว</p>
+              <p className="text-[11px] text-gray-300 font-medium mt-1">บริหารผู้ใช้งาน ตรวจสอบการส่งผล และติดตาม Participation ของโครงการ</p>
             </div>
           </div>
-          
-          <button
-            onClick={onExit}
-            className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>กลับหน้าหลักแอป</span>
-          </button>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <a href={DATABASE_URL} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 px-3 py-2 rounded-xl text-xs font-bold transition-colors">
+              <ExternalLink className="w-4 h-4" /> เปิด Google Sheets
+            </a>
+            <button onClick={onExit} className="flex items-center gap-1.5 bg-white text-black hover:bg-slate-100 px-3 py-2 rounded-xl text-xs font-bold cursor-pointer">
+              <ArrowLeft className="w-4 h-4" /> กลับหน้าหลัก
+            </button>
+          </div>
         </div>
-      </div>
+      </header>
 
-      {/* Main Bento Core Area */}
-      <div className="max-w-7xl mx-auto px-4 md:px-6 pt-8 space-y-8">
-        
-        {/* Row 1: System Health Dashboard Metrics (Bento Grid) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          
-          {/* Card 1: Total Users */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+      <main className="max-w-7xl mx-auto px-4 md:px-6 pt-7 space-y-7">
+        <section className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 shadow-xs">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <p className="text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">จำนวนพนักงานที่จดทะเบียน</p>
-              <h2 className="text-3xl font-black text-black mt-2 font-mono">{totalEmployees} <span className="text-xs text-slate-500 font-semibold font-sans">คน</span></h2>
-              <p className="text-[10px] text-emerald-600 font-medium mt-1">● บูตแลบ Google Sheets เรียบร้อย</p>
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#00914E]">Reporting Scope</p>
+              <h2 className="font-black text-black mt-1">ช่วงข้อมูลที่ใช้คำนวณ Dashboard และ Leaderboard</h2>
+              <p className="text-xs text-slate-500 mt-1">ปัจจุบันเลือก: {selectedPeriodLabel}</p>
             </div>
-            <div className="bg-emerald-50 text-[#00914E] p-3 rounded-xl">
-              <Users className="w-6 h-6" />
+            <div className="flex flex-wrap gap-2">
+              <select value={reportMonthFilter} onChange={(event) => { setReportMonthFilter(event.target.value); setReportWeekFilter('all'); }} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]">
+                <option value="all">ทุกเดือน · ทั้งโครงการ</option>
+                {CAMPAIGN_MONTHS.map((month) => <option key={month.number} value={month.number}>{month.label}</option>)}
+              </select>
+              <select value={reportWeekFilter} onChange={(event) => setReportWeekFilter(event.target.value)} disabled={reportMonthFilter === 'all'} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-[#00914E] disabled:opacity-50">
+                <option value="all">ทุกสัปดาห์ในเดือน</option>
+                {(reportMonthFilter === 'all' ? [] : getCampaignMonth(Number(reportMonthFilter)).weeks).map((week) => <option key={week.number} value={week.number}>{week.label} · {week.range}</option>)}
+              </select>
+              <button onClick={loadAdminData} className="bg-[#00914E] text-white hover:bg-[#00703c] px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} /> รีเฟรชข้อมูล
+              </button>
             </div>
           </div>
+        </section>
 
-          {/* Card 2: Total Logs */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">จำนวนธุรกรรมบันทึกผลก้าว</p>
-              <h2 className="text-3xl font-black text-black mt-2 font-mono">{totalLogsCount} <span className="text-xs text-slate-500 font-semibold font-sans">รายการ</span></h2>
-              <p className="text-[10px] text-slate-500 font-semibold mt-1">คีย์เดี่ยว ID คอนเฟิร์มภาพแล้ว</p>
-            </div>
-            <div className="bg-blue-50 text-blue-600 p-3 rounded-xl">
-              <CheckCircle className="w-6 h-6" />
-            </div>
-          </div>
+        {loadError && <div className="bg-rose-50 border border-rose-100 text-rose-700 rounded-xl px-4 py-3 text-xs font-bold">{loadError}</div>}
 
-          {/* Card 3: Grand Total Steps */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">ผลก้าวสะสมทั่วไทยรัฐกรุ๊ป</p>
-              <h2 className="text-3xl font-black text-black mt-2 font-mono">{totalStepsSum.toLocaleString()} <span className="text-xs text-slate-500 font-semibold font-sans">ก้าว</span></h2>
-              <p className="text-[10px] text-amber-600 font-medium mt-1">🔥 ก้าวสู่เป้าหมายองค์กรสีเขียว</p>
-            </div>
-            <div className="bg-amber-50 text-amber-600 p-3 rounded-xl">
-              <Coins className="w-6 h-6" />
-            </div>
-          </div>
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5">
+          {metricCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <article key={card.label} className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-xs min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-[10px] md:text-[11px] text-slate-500 font-extrabold leading-relaxed">{card.label}</p>
+                  <div className={`p-2 rounded-xl ${card.className}`}><Icon className="w-4 h-4" /></div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-1.5"><span className="text-2xl md:text-3xl font-black text-black tabular-nums">{card.value}</span><span className="text-xs font-bold text-slate-500">{card.suffix}</span></div>
+                <p className="text-[9px] md:text-[10px] text-slate-400 font-semibold mt-1.5 truncate" title={card.helper}>{card.helper}</p>
+              </article>
+            );
+          })}
+        </section>
 
-          {/* Card 4: Average daily steps */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">จำนวนก้าวเฉลี่ยต่อการรายงาน</p>
-              <h2 className="text-3xl font-black text-black mt-2 font-mono">{averageSteps.toLocaleString()} <span className="text-xs text-slate-500 font-semibold font-sans">ก้าว</span></h2>
-              <p className="text-[10px] text-slate-500 font-semibold mt-1">คำนวณจากฐานข้อมูล Google Sheets</p>
-            </div>
-            <div className="bg-purple-50 text-purple-600 p-3 rounded-xl">
-              <Ticket className="w-6 h-6" />
-            </div>
-          </div>
+        <nav className="flex gap-2 overflow-x-auto border-b border-slate-200 scrollbar-none">
+          {[
+            { id: 'employees', label: `ฐานข้อมูลพนักงาน (${filteredUsers.length}/${users.length})`, icon: Users },
+            { id: 'submissions', label: `รายการส่งผล (${filteredLogs.length}/${logsInSelectedPeriod.length})`, icon: FileSpreadsheet },
+            { id: 'leaderboard', label: 'Leaderboard & Participation', icon: Trophy }
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const active = activeSubTab === tab.id;
+            return (
+              <button key={tab.id} onClick={() => setActiveSubTab(tab.id as typeof activeSubTab)} className={`pb-3 px-2 text-xs md:text-sm font-extrabold flex items-center gap-2 whitespace-nowrap border-b-3 cursor-pointer ${active ? 'text-[#00914E] border-[#00914E]' : 'text-slate-500 border-transparent hover:text-black'}`}>
+                <Icon className="w-4 h-4" /> {tab.label}
+              </button>
+            );
+          })}
+        </nav>
 
-        </div>
-
-        {/* Console Navigation Tabs */}
-        <div className="flex border-b border-gray-250 gap-4">
-          <button
-            onClick={() => setActiveSubTab('employees')}
-            className={`pb-3.5 text-sm font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-              activeSubTab === 'employees'
-                ? 'text-[#00914E] border-b-3 border-[#00914E]'
-                : 'text-slate-500 hover:text-black font-semibold'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>ฐานข้อมูลพนักงาน ({filteredUsers.length} / {totalEmployees})</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveSubTab('submissions')}
-            className={`pb-3.5 text-sm font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-              activeSubTab === 'submissions'
-                ? 'text-[#00914E] border-b-3 border-[#00914E]'
-                : 'text-slate-500 hover:text-black font-semibold'
-            }`}
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>ตรวจสอบหลักฐานและข้อมูลก้าว ({filteredLogs.length} / {totalLogsCount})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSubTab('leaderboard')}
-            className={`pb-3.5 text-sm font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-              activeSubTab === 'leaderboard'
-                ? 'text-[#00914E] border-b-3 border-[#00914E]'
-                : 'text-slate-500 hover:text-black font-semibold'
-            }`}
-          >
-            <Trophy className="w-4 h-4 text-amber-500" />
-            <span>บอร์ดคะแนน & สถิติรวม (Admin Leaderboard)</span>
-          </button>
-        </div>
-
-        {/* TAB 1: EMPLOYEES DIRECTORY */}
         {activeSubTab === 'employees' && (
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden">
-            
-            {/* Table Controller bar */}
-            <div className="p-6 bg-slate-50/50 border-b border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-center">
-              
-              <div className="relative w-full md:w-80">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                  <Search className="w-4 h-4" />
-                </span>
-                <input
-                  type="text"
-                  placeholder="ค้นหาพนักงานด้วย ชื่อ/รหัส/ชื่อเล่น..."
-                  value={userSearchText}
-                  onChange={(e) => setUserSearchText(e.target.value)}
-                  className="w-full bg-white border border-slate-250 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]"
-                />
+          <section className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 md:p-5 bg-slate-50 border-b border-slate-200 flex flex-col lg:flex-row gap-3 justify-between">
+              <div className="relative w-full lg:w-96">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input value={userSearchText} onChange={(event) => setUserSearchText(event.target.value)} placeholder="ค้นหาด้วยชื่อ รหัสพนักงาน ชื่อเล่น หรืออีเมล" className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]" />
               </div>
-
-              <div className="flex flex-wrap gap-2.5 w-full md:w-auto justify-end">
-                {/* Department drop */}
-                <select
-                  value={userDeptFilter}
-                  onChange={(e) => setUserDeptFilter(e.target.value)}
-                  className="bg-white border border-slate-250 rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer"
-                >
-                  <option value="all">ฝ่ายทั้งหมด (All)</option>
-                  {allDepartments.map(d => (
-                    <option key={d.id} value={d.id}>{d.nameTh}</option>
-                  ))}
+              <div className="flex flex-wrap gap-2">
+                <select value={userDeptFilter} onChange={(event) => setUserDeptFilter(event.target.value)} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold outline-none">
+                  <option value="all">ทุกฝ่าย</option>
+                  {allDepartments.map((department) => <option key={department.id} value={department.id}>{department.nameTh}</option>)}
                 </select>
-
-                <button
-                  onClick={() => handleExportToExcel('employees')}
-                  className="bg-white border border-[#00914E] hover:bg-[#E8F5E9] text-[#00914E] px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
-                  title="ดาวน์โหลดฐานข้อมูลพนักงานทั้งหมดทาง Excel"
-                >
-                  <Download className="w-4 h-4 text-[#00914E]" />
-                  <span>บันทึกเป็น Excel</span>
-                </button>
-
-                <button
-                  onClick={() => setShowAddUserModal(true)}
-                  className="bg-[#00914E] hover:bg-[#00703c] text-white px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>เพิ่มพนักงานในระบบด้วยมือ</span>
-                </button>
-
-                <button
-                  onClick={loadAdminData}
-                  className="bg-white border border-slate-250 hover:bg-slate-50 text-slate-700 px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
-                  title="รีเฟรชข้อมูลเรียลไทม์"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                <button onClick={exportEmployees} className="bg-white border border-[#00914E] text-[#00914E] hover:bg-[#E8F5E9] px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Export CSV</button>
+                <button onClick={() => setShowAddUserModal(true)} className="bg-[#00914E] text-white hover:bg-[#00703c] px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"><UserPlus className="w-4 h-4" /> เพิ่มพนักงาน</button>
               </div>
-
             </div>
 
-            {/* List Table */}
             {isLoading ? (
-              <div className="p-16 text-center">
-                <div className="w-8 h-8 border-3 border-[#00914E] border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-xs font-extrabold text-slate-500 mt-3 font-sans">กำลังดึงฐานพนักงานจริงจาก Thairath Google Sheets...</p>
-              </div>
+              <div className="p-14 text-center"><RefreshCw className="w-7 h-7 animate-spin mx-auto text-[#00914E]" /><p className="text-xs font-bold text-slate-500 mt-3">กำลังโหลดฐานข้อมูลพนักงาน...</p></div>
             ) : filteredUsers.length === 0 ? (
-              <div className="p-16 text-center text-slate-400 font-bold text-xs">
-                ไม่พบข้อมูลพนักงานที่ตรงกับเงื่อนไขการค้นหาของคุณในขณะนี้
-              </div>
+              <div className="p-14 text-center text-slate-400 text-xs font-bold">ไม่พบพนักงานที่ตรงกับตัวกรอง</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100/70 border-b border-gray-100 text-slate-500 font-extrabold">
-                      <th className="py-4.5 px-6">รหัสพนักงาน</th>
-                      <th className="py-4.5 px-6">ชื่อ-นามสกุล / ชื่อเล่น</th>
-                      <th className="py-4.5 px-6">ฝ่ายย่อย (Department)</th>
-                      <th className="py-4.5 px-6 text-center">รหัสผ่าน (วันเกิดปีพ.ศ.)</th>
-                      <th className="py-4.5 px-6 text-center">Login ล่าสุด</th>
-                      <th className="py-4.5 px-6 text-center">ตั๋วจับฉลากวิเศษ</th>
-                      <th className="py-4.5 px-6 text-right">ดำเนินการหลังบ้าน</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-150">
-                    {filteredUsers.map((u) => {
-                      const dept = resolveDepartment(u.departmentId);
+                <table className="w-full min-w-[1050px] text-left text-xs border-collapse">
+                  <thead><tr className="bg-slate-100/80 text-slate-500 font-extrabold border-b border-slate-200">
+                    <th className="py-4 px-5">รหัสพนักงาน</th><th className="py-4 px-5">ชื่อ-นามสกุล / ชื่อเล่น</th><th className="py-4 px-5">ฝ่าย</th><th className="py-4 px-5">Login ล่าสุด</th><th className="py-4 px-5">ส่งผลล่าสุด</th><th className="py-4 px-5 text-center">ตั๋วสะสม</th><th className="py-4 px-5 text-right">ดำเนินการ</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredUsers.map((user) => {
+                      const department = resolveDepartment(user.departmentId);
+                      const latestSubmit = user.lastSubmitAt || latestSubmitByEmployee.get(normalizeText(user.employeeId)) || latestSubmitByEmployee.get(normalizeText(user.email));
                       return (
-                        <tr key={u.id} className="hover:bg-slate-50/50 transition-colors font-medium text-[#344054]">
-                          <td className="py-4 px-6 font-mono font-bold text-[#00914E]">
-                            {u.employeeId}
-                          </td>
-                          <td className="py-4 px-6">
-                            <div className="font-extrabold text-black">{u.name}</div>
-                            <div className="text-[10px] text-slate-400 font-semibold mt-0.5">ชื่อแสดงบอร์ด: "{u.nickname}" {u.age ? `• อายุ ${u.age} ปี` : ''}</div>
-                          </td>
-                          <td className="py-4 px-6">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#E8F5E9] text-[#00914E] font-bold text-[10px]">
-                              <Building className="w-3 h-3" />
-                              {dept?.nameTh || 'ไม่ระบุฝ่าย'}
-                            </span>
-                          </td>
-                          <td className="py-4 px-6 text-center font-mono font-extrabold text-slate-700 bg-slate-50/40">
-                            {u.password || 'ไม่มี'}
-                          </td>
-                          <td className="py-4 px-6 text-center text-[10px] font-bold text-slate-500 whitespace-nowrap">
-                            {formatDateTime(u.lastLoginAt)}
-                          </td>
-                          <td className="py-4 px-6 text-center">
-                            <div className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-600 px-3 py-1.5 rounded-xl font-mono text-[13px] font-black border border-amber-100/60 shadow-2xs">
-                              <Ticket className="w-4 h-4 text-amber-500" />
-                              <span>{u.totalTickets} ใบ</span>
-                            </div>
-                          </td>
-                          <td className="py-4 px-6 text-right">
-                            <button
-                              onClick={() => {
-                                setAdjustingUser(u);
-                                setTicketDelta(1);
-                              }}
-                              className="text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg px-2.5 py-1.5 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-all border border-amber-200"
-                            >
-                              <Ticket className="w-3 h-3" />
-                              <span>ปรับจำนวนตั๋ว</span>
-                            </button>
-                          </td>
+                        <tr key={user.employeeId || user.email} className="hover:bg-slate-50 transition-colors">
+                          <td className="py-4 px-5 font-bold text-[#00914E] tabular-nums">{user.employeeId}</td>
+                          <td className="py-4 px-5"><p className="font-extrabold text-black">{getDisplayName(user)}</p><p className="text-[10px] text-slate-400 mt-0.5">ชื่อเล่น: {user.nickname || '-'} {user.age ? `· อายุ ${user.age} ปี` : ''}</p></td>
+                          <td className="py-4 px-5"><span className="inline-flex items-center gap-1.5 bg-[#E8F5E9] text-[#00914E] px-2.5 py-1.5 rounded-lg font-bold text-[10px]"><Building className="w-3 h-3" />{department?.nameTh || user.departmentId || 'ไม่ระบุฝ่าย'}</span></td>
+                          <td className="py-4 px-5 text-[10px] font-bold text-slate-600 whitespace-nowrap">{formatDateTime(user.lastLoginAt, 'ยังไม่เคย Login')}</td>
+                          <td className="py-4 px-5 text-[10px] font-bold text-slate-600 whitespace-nowrap">{formatDateTime(latestSubmit, 'ยังไม่เคยส่งผล')}</td>
+                          <td className="py-4 px-5 text-center"><span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-xl font-black border border-amber-100"><Ticket className="w-4 h-4" />{user.totalTickets || 0} ใบ</span></td>
+                          <td className="py-4 px-5 text-right"><button onClick={() => { setAdjustingUser(user); setTicketDelta(1); }} className="bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer">ปรับตั๋ว</button></td>
                         </tr>
                       );
                     })}
@@ -600,146 +526,42 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
                 </table>
               </div>
             )}
-
-          </div>
+          </section>
         )}
 
-        {/* TAB 2: STEP SUBMISSIONS LIST */}
         {activeSubTab === 'submissions' && (
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden">
-            
-            {/* Table Controller bar */}
-            <div className="p-6 bg-slate-50/50 border-b border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-center">
-              
-              <div className="relative w-full md:w-80">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                  <Search className="w-4 h-4" />
-                </span>
-                <input
-                  type="text"
-                  placeholder="ค้นหาด้วยอีเมล / ชื่อพนักงาน / ชื่อไฟล์ภาพ..."
-                  value={logSearchText}
-                  onChange={(e) => setLogSearchText(e.target.value)}
-                  className="w-full bg-white border border-slate-250 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]"
-                />
+          <section className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 md:p-5 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row gap-3 justify-between">
+              <div className="relative w-full md:w-96">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input value={logSearchText} onChange={(event) => setLogSearchText(event.target.value)} placeholder="ค้นหาชื่อ รหัสพนักงาน อีเมล หรือชื่อไฟล์" className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]" />
               </div>
-
-              <div className="flex flex-wrap gap-2.5 w-full md:w-auto justify-end">
-                {/* Week drop */}
-                <select
-                  value={logWeekFilter}
-                  onChange={(e) => setLogWeekFilter(e.target.value)}
-                  className="bg-white border border-slate-250 rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer"
-                >
-                  <option value="all">ทุกสัปดาห์</option>
-                  <option value="1">สัปดาห์ที่ 1</option>
-                  <option value="2">สัปดาห์ที่ 2</option>
-                  <option value="3">สัปดาห์ที่ 3</option>
-                  <option value="4">สัปดาห์ที่ 4</option>
-                </select>
-
-                <button
-                  onClick={() => handleExportToExcel('submissions')}
-                  className="bg-white border border-[#00914E] hover:bg-[#E8F5E9] text-[#00914E] px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
-                  title="ดาวน์โหลดไฟล์ประวัติรายงานก้าวทั้งหมดทาง Excel"
-                >
-                  <Download className="w-4 h-4 text-[#00914E]" />
-                  <span>บันทึกเป็น Excel</span>
-                </button>
-
-                <button
-                  onClick={loadAdminData}
-                  className="bg-white border border-slate-250 hover:bg-slate-50 text-slate-700 px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
-                  title="รีเฟรชข้อมูลเรียลไทม์"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
-              </div>
-
+              <button onClick={exportSubmissions} className="bg-white border border-[#00914E] text-[#00914E] hover:bg-[#E8F5E9] px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Export ตามตัวกรอง</button>
             </div>
 
-            {/* List Table */}
             {isLoading ? (
-              <div className="p-16 text-center">
-                <div className="w-8 h-8 border-3 border-[#00914E] border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-xs font-extrabold text-slate-500 mt-3 font-sans">กำลังดึงรายการหลักฐานการส่งก้าวพนักงานทั้งหมดจาก Google Sheets...</p>
-              </div>
+              <div className="p-14 text-center"><RefreshCw className="w-7 h-7 animate-spin mx-auto text-[#00914E]" /><p className="text-xs font-bold text-slate-500 mt-3">กำลังโหลดรายการส่งผล...</p></div>
             ) : filteredLogs.length === 0 ? (
-              <div className="p-16 text-center text-slate-400 font-bold text-xs">
-                ไม่พบรายการหลักฐานก้าวคำนวณที่สอดคล้องกับตัวกรองนี้
-              </div>
+              <div className="p-14 text-center text-slate-400 text-xs font-bold">ไม่พบรายการส่งผลในช่วงที่เลือก</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100/70 border-b border-gray-100 text-slate-500 font-extrabold">
-                      <th className="py-4.5 px-6">สัปดาห์</th>
-                      <th className="py-4.5 px-6">พนักงานผู้ส่งรายงาน</th>
-                      <th className="py-4.5 px-6">วันทำกิจกรรม</th>
-                      <th className="py-4.5 px-6 text-center">สถิติจำนวนก้าว</th>
-                      <th className="py-4.5 px-6">ภาพถ่ายหลังแอป (Proof of Walk)</th>
-                      <th className="py-4.5 px-6">เวลาที่ส่งเข้าระบบ</th>
-                      <th className="py-4.5 px-6 text-right">ดำเนินการลบข้อมูล</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-150">
+                <table className="w-full min-w-[1050px] text-left text-xs border-collapse">
+                  <thead><tr className="bg-slate-100/80 text-slate-500 font-extrabold border-b border-slate-200">
+                    <th className="py-4 px-5">เดือน / สัปดาห์</th><th className="py-4 px-5">พนักงาน</th><th className="py-4 px-5">ฝ่าย</th><th className="py-4 px-5 text-right">จำนวนก้าว</th><th className="py-4 px-5">หลักฐาน</th><th className="py-4 px-5">เวลาที่ส่ง</th><th className="py-4 px-5 text-right">ลบ</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-slate-100">
                     {filteredLogs.map((log) => {
-                      const userProfile = users.find(u => u.email.toLowerCase() === log.userEmail.toLowerCase());
-                      const dept = userProfile ? resolveDepartment(userProfile.departmentId) : null;
-                      
+                      const user = findUserForLog(log);
+                      const department = resolveDepartment(user?.departmentId);
                       return (
-                        <tr key={log.id} className="hover:bg-slate-50/50 transition-colors font-medium">
-                          <td className="py-4 px-6 text-[#00914E] font-black font-mono">
-                            Week {log.week}
-                          </td>
-                          <td className="py-4 px-6 text-[#344054]">
-                            {userProfile ? (
-                              <div>
-                                <span className="font-extrabold text-black block">{userProfile.name}</span>
-                                <span className="text-[10px] text-slate-400 font-semibold block">{userProfile.employeeId} • {dept?.nameTh || 'ไม่ระบุแผนก'}</span>
-                              </div>
-                            ) : (
-                              <span className="font-semibold text-slate-400">{log.userEmail}</span>
-                            )}
-                          </td>
-                          <td className="py-4 px-6 font-mono font-bold text-slate-700">
-                            {log.date}
-                          </td>
-                          <td className="py-4 px-6 text-center font-mono text-black font-extrabold text-[14px]">
-                            {log.steps.toLocaleString()} ก้าว
-                          </td>
-                          <td className="py-4 px-6">
-                            <div className="flex items-center gap-3">
-                              {log.imagePreview ? (
-                                <img
-                                  src={log.imagePreview}
-                                  alt="Screenshot proof"
-                                  referrerPolicy="no-referrer"
-                                  className="w-10 h-10 object-cover rounded-md border border-slate-200/80 shadow-3xs"
-                                />
-                              ) : (
-                                <div className="w-10 h-10 rounded-md bg-slate-100 flex items-center justify-center text-slate-300 font-bold text-[9px] text-center border leading-tight">
-                                  No img
-                                </div>
-                              )}
-                              <div className="text-left">
-                                <p className="text-[10px] font-bold text-slate-600 max-w-[120px] truncate" title={log.imageName}>{log.imageName}</p>
-                                <p className="text-[9px] text-slate-400 font-semibold">อัปโหลดออฟฟิเชียล</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-4 px-6 font-mono text-slate-400 text-[10px]" title={log.submittedAt}>
-                            {new Date(log.submittedAt).toLocaleString('th-TH', { hour12: false })}
-                          </td>
-                          <td className="py-4 px-6 text-right">
-                            <button
-                              onClick={() => handleDeleteLogClick(log.id)}
-                              className="text-rose-600 hover:text-white hover:bg-rose-600 bg-rose-50 border border-rose-100 p-2 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center"
-                              title="ลบรายงานนี้ทิ้งถาวร"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
+                        <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="py-4 px-5"><p className="font-extrabold text-[#00914E]">{getCampaignMonth(Number(log.week)).shortLabel}</p><p className="text-[10px] text-slate-400 mt-0.5">{log.weekOfMonth ? `สัปดาห์ที่ ${log.weekOfMonth}` : 'ข้อมูลเดิม'}</p></td>
+                          <td className="py-4 px-5"><p className="font-extrabold text-black">{user ? getDisplayName(user) : log.userEmail}</p><p className="text-[10px] text-slate-400 mt-0.5">{user?.employeeId || log.employeeId || '-'}</p></td>
+                          <td className="py-4 px-5 text-[10px] font-bold text-slate-600">{department?.nameTh || user?.departmentId || 'ไม่ระบุฝ่าย'}</td>
+                          <td className="py-4 px-5 text-right font-black text-black text-sm tabular-nums">{Number(log.steps).toLocaleString()} ก้าว</td>
+                          <td className="py-4 px-5"><p className="max-w-[180px] truncate text-[10px] font-semibold text-slate-500" title={log.imageName}>{log.imageName || 'ไม่มีชื่อไฟล์'}</p></td>
+                          <td className="py-4 px-5 text-[10px] font-bold text-slate-500 whitespace-nowrap">{formatDateTime(log.submittedAt)}</td>
+                          <td className="py-4 px-5 text-right"><button onClick={() => handleDeleteLogClick(log.id)} className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white border border-rose-100 p-2 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button></td>
                         </tr>
                       );
                     })}
@@ -747,337 +569,72 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
                 </table>
               </div>
             )}
-
-          </div>
+          </section>
         )}
 
-        {/* TAB 3: ADMIN LEADERBOARD */}
         {activeSubTab === 'leaderboard' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            
-            {/* Left Box: อันดับแต่ละฝ่าย (Department rankings by total steps) */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-base font-extrabold text-black flex items-center gap-2">
-                    <Building className="w-5 h-5 text-[#00914E]" />
-                    สรุปอันดับก้าวสะสมรายฝ่าย (Department Rankings)
-                  </h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">รวมสถิติเดินก้าวสะสมเรียงอันดับจากฝ่ายย่อยทั้งหมดในไทยรัฐ</p>
-                </div>
-                <span className="text-[10px] bg-[#E8F5E9] text-[#00914E] px-2 py-1 rounded font-extrabold font-mono uppercase">
-                  Live
-                </span>
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <article className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 md:p-6">
+              <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
+                <div><h3 className="font-black text-black flex items-center gap-2"><Building className="w-5 h-5 text-[#00914E]" />อันดับรายฝ่าย</h3><p className="text-[10px] text-slate-400 mt-1">คำนวณจาก {selectedPeriodLabel}</p></div>
+                <span className="text-[9px] bg-[#E8F5E9] text-[#00914E] px-2 py-1 rounded font-extrabold">LIVE</span>
               </div>
-
-              <div className="space-y-3">
-                {adminDeptLeaderboard.map((dept, index) => {
-                  const rankColors = [
-                    'bg-amber-100 text-amber-800 border-amber-200', // 1st
-                    'bg-slate-200 text-slate-800 border-slate-300', // 2nd
-                    'bg-amber-600/10 text-amber-700 border-amber-600/20', // 3rd
-                  ];
-                  const rankBadge = index < 3 
-                    ? `w-6 h-6 rounded-full flex items-center justify-center font-black text-xs border ${rankColors[index]}`
-                    : `w-6 h-6 rounded-full flex items-center justify-center font-black text-xs text-slate-400 font-mono`;
-
-                  return (
-                    <div 
-                      key={dept.id} 
-                      className="flex items-center justify-between p-3.5 bg-slate-50/60 rounded-2xl border border-slate-100 hover:border-slate-300/80 transition-all"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={rankBadge}>
-                          {index + 1}
-                        </div>
-                        <div className="w-2.5 h-2.5 rounded-full bg-[#00914E]" />
-                        <div>
-                          <p className="font-extrabold text-xs text-black">{dept.nameTh}</p>
-                          <p className="text-[10px] text-slate-400 font-semibold">{dept.nameEn} • {dept.memberCount} สมาชิก</p>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <p className="font-mono text-[13px] font-black text-[#00914E]">{dept.totalSteps.toLocaleString()} ก้าว</p>
-                        <p className="text-[9px] text-[#00914E] font-bold flex items-center gap-0.5 justify-end mt-0.5">
-                          <Ticket className="w-3 text-amber-500" />
-                          <span>ตั๋วรวม {dept.totalTickets} ใบ</span>
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="space-y-3 mt-5">
+                {departmentLeaderboard.length === 0 ? <p className="text-center py-10 text-xs text-slate-400 font-bold">ยังไม่มีข้อมูลในช่วงที่เลือก</p> : departmentLeaderboard.map((department, index) => (
+                  <div key={department.id} className="flex items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="flex items-center gap-3 min-w-0"><span className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${index < 3 ? 'bg-amber-100 text-amber-800' : 'bg-white text-slate-500 border border-slate-200'}`}>{index + 1}</span><div className="min-w-0"><p className="font-extrabold text-xs text-black truncate">{department.nameTh}</p><p className="text-[9px] text-slate-400 mt-0.5">ส่ง {department.participantCount}/{department.memberCount} คน · {department.participationRate}%</p></div></div>
+                    <div className="text-right shrink-0"><p className="font-black text-[#00914E] text-xs tabular-nums">{department.totalSteps.toLocaleString()} ก้าว</p><p className="text-[9px] text-slate-400 mt-0.5">เฉลี่ย {department.averageSteps.toLocaleString()}/คน</p></div>
+                  </div>
+                ))}
               </div>
-            </div>
+            </article>
 
-            {/* Right Box: Top 10 Employees with most tickets */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-base font-extrabold text-black flex items-center gap-2">
-                    <Trophy className="w-5 h-5 text-amber-500" />
-                    พนักงาน Top 10 ที่ได้ตั๋วมากที่สุด (Most Tickets)
-                  </h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">รายชื่อสุดยอดพนักงานที่สะสมความเพียรพยายามรับจำนวนสิทธิตั๋วสะสมทองคำสูงสุด</p>
-                </div>
-                <span className="text-[10px] bg-amber-50 text-amber-600 px-2 py-1 rounded font-extrabold font-mono uppercase border border-amber-100">
-                  Golden
-                </span>
+            <article className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 md:p-6">
+              <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
+                <div><h3 className="font-black text-black flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" />Top Walkers</h3><p className="text-[10px] text-slate-400 mt-1">ยอดก้าวรวมรายบุคคลใน {selectedPeriodLabel}</p></div>
+                <span className="text-[9px] bg-amber-50 text-amber-700 px-2 py-1 rounded font-extrabold">TOP 10</span>
               </div>
-
-              {top10TicketUsers.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 font-semibold text-xs">
-                  ยังไม่มีสถิติผู้ถือตั๋วจับฉลากในระบบขณะนี้
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {top10TicketUsers.map((emp, index) => {
-                    const dept = resolveDepartment(emp.departmentId);
-                    
-                    const rankColors = [
-                      'bg-amber-100 text-amber-800 border-amber-200', // 1st
-                      'bg-slate-200 text-slate-800 border-slate-300', // 2nd
-                      'bg-amber-600/10 text-amber-700 border-amber-600/20', // 3rd
-                    ];
-                    const rankBadge = index < 3 
-                      ? `w-6 h-6 rounded-full flex items-center justify-center font-black text-xs border ${rankColors[index]}`
-                      : `w-6 h-6 rounded-full flex items-center justify-center font-black text-xs text-slate-400 font-mono`;
-
-                    return (
-                      <div 
-                        key={emp.id} 
-                        className="flex items-center justify-between p-3.5 bg-slate-50/60 rounded-2xl border border-slate-100 hover:border-slate-300/80 transition-all"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={rankBadge}>
-                            {index + 1}
-                          </div>
-                          <div>
-                            <p className="font-extrabold text-xs text-black">{emp.name}</p>
-                            <p className="text-[10px] text-slate-400 font-semibold">{emp.employeeId} • ฝ่าย{dept?.nameTh || 'ไม่ระบุ'}</p>
-                          </div>
-                        </div>
-
-                        <div className="text-right">
-                          <div className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-600 px-3 py-1.5 rounded-xl font-mono text-[12px] font-black border border-amber-100/60 font-sans">
-                            <Ticket className="w-3.5 h-3.5 text-amber-500" />
-                            <span>{emp.totalTickets || 0} ใบ</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-          </div>
+              <div className="space-y-3 mt-5">
+                {topWalkers.length === 0 ? <p className="text-center py-10 text-xs text-slate-400 font-bold">ยังไม่มีข้อมูลในช่วงที่เลือก</p> : topWalkers.map(({ user, steps }, index) => (
+                  <div key={user?.employeeId || index} className="flex items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="flex items-center gap-3 min-w-0"><span className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${index < 3 ? 'bg-amber-100 text-amber-800' : 'bg-white text-slate-500 border border-slate-200'}`}>{index + 1}</span><div className="min-w-0"><p className="font-extrabold text-xs text-black truncate">{user?.name} ({user?.nickname || '-'})</p><p className="text-[9px] text-slate-400 mt-0.5">{user?.employeeId} · {resolveDepartment(user?.departmentId)?.nameTh || user?.departmentId || 'ไม่ระบุฝ่าย'}</p></div></div>
+                    <p className="font-black text-[#00914E] text-xs tabular-nums shrink-0">{steps.toLocaleString()} ก้าว</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
         )}
+      </main>
 
-      </div>
-
-      {/* MODAL 1: ADD EMPLOYEE DISCOVERY PORTAL */}
       {showAddUserModal && (
-        <div className="fixed inset-0 bg-[#000000]/60 backdrop-blur-xs flex items-center justify-center z-55 p-4 animate-fade-in">
-          <div className="bg-white max-w-md w-full rounded-3xl border border-slate-100 shadow-2xl p-6 relative overflow-hidden space-y-4">
-            
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="text-base font-extrabold text-black font-sans flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-[#00914E]" />
-                เพิ่มพนักงานคนใหม่เข้าสู่ระบบหลังบ้าน
-              </h3>
-              <button
-                onClick={() => setShowAddUserModal(false)}
-                className="text-slate-400 hover:text-black font-bold text-sm cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {newEmpError && (
-              <div className="bg-red-50 text-red-600 border border-red-100 text-xs p-3 rounded-lg font-bold">
-                ⚠️ {newEmpError}
-              </div>
-            )}
-
-            <form onSubmit={handleAddUserSubmit} className="space-y-4 text-xs font-semibold">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">รหัสพนักงาน (6 หลัก)</label>
-                <input
-                  type="text"
-                  maxLength={6}
-                  value={newEmpId}
-                  onChange={(e) => setNewEmpId(e.target.value.replace(/\D/g, ''))}
-                  placeholder="เช่น 100344"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white text-sm font-bold font-mono"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">ชื่อจริง</label>
-                  <input
-                    type="text"
-                    value={newEmpName}
-                    onChange={(e) => setNewEmpName(e.target.value)}
-                    placeholder="เช่น สมชาย"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white font-bold"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">นามสกุล</label>
-                  <input
-                    type="text"
-                    value={newEmpSurname}
-                    onChange={(e) => setNewEmpSurname(e.target.value)}
-                    placeholder="เช่น สุขสำราญ"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white font-bold"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">ชื่อเล่นแสดงผล</label>
-                <input
-                  type="text"
-                  value={newEmpNickname}
-                  onChange={(e) => setNewEmpNickname(e.target.value)}
-                  placeholder="เช่น หนุ่ย"
-                  maxLength={15}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white font-bold"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">ฝ่าย / แผนกงาน</label>
-                <select
-                  value={newEmpDept}
-                  onChange={(e) => setNewEmpDept(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white text-xs font-bold cursor-pointer"
-                >
-                  {allDepartments.map(d => (
-                    <option key={d.id} value={d.id}>{d.nameTh}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-1 leading-none uppercase">วันเกิด</label>
-                <input
-                  type="date"
-                  value={newEmpBirthDate}
-                  onChange={(e) => setNewEmpBirthDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 outline-none focus:border-[#00914E] focus:bg-white text-sm font-bold font-mono"
-                  required
-                />
-                <p className="mt-1 text-[10px] text-slate-400 font-bold">ระบบจะคำนวณอายุและสร้างรหัสผ่านรูปแบบ DDMMYY พ.ศ. ให้อัตโนมัติ</p>
-              </div>
-
-              <div className="flex gap-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddUserModal(false)}
-                  className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-lg text-xs font-bold transition-all cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingUser}
-                  className="w-1/2 bg-[#00914E] hover:bg-[#00703c] disabled:bg-slate-350 text-white py-3 rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow-sm"
-                >
-                  {isSavingUser ? 'กำลังบันทึกลง Sheets...' : 'เพิ่มพนักงานสำเร็จ'}
-                </button>
-              </div>
-
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+          <div className="bg-white max-w-md w-full rounded-2xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100"><h3 className="font-black text-black flex items-center gap-2"><UserPlus className="w-5 h-5 text-[#00914E]" />เพิ่มพนักงาน</h3><button onClick={() => setShowAddUserModal(false)} className="text-slate-400 hover:text-black cursor-pointer">✕</button></div>
+            {newEmpError && <div className="mt-4 bg-rose-50 border border-rose-100 text-rose-700 p-3 rounded-xl text-xs font-bold">{newEmpError}</div>}
+            <form onSubmit={handleAddUserSubmit} className="space-y-4 mt-5 text-xs font-semibold">
+              <div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">รหัสพนักงาน 6 หลัก</label><input value={newEmpId} onChange={(event) => setNewEmpId(event.target.value.replace(/\D/g, ''))} maxLength={6} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" placeholder="เช่น 100344" /></div>
+              <div className="grid grid-cols-2 gap-3"><div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">ชื่อจริง</label><input value={newEmpName} onChange={(event) => setNewEmpName(event.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" /></div><div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">นามสกุล</label><input value={newEmpSurname} onChange={(event) => setNewEmpSurname(event.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" /></div></div>
+              <div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">ชื่อเล่น</label><input value={newEmpNickname} onChange={(event) => setNewEmpNickname(event.target.value)} maxLength={20} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" /></div>
+              <div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">ฝ่าย</label><select value={newEmpDept} onChange={(event) => setNewEmpDept(event.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold">{allDepartments.map((department) => <option key={department.id} value={department.id}>{department.nameTh}</option>)}</select></div>
+              <div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">วันเกิด</label><input type="date" value={newEmpBirthDate} onChange={(event) => setNewEmpBirthDate(event.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" /><p className="text-[9px] text-slate-400 mt-1">ระบบจะคำนวณอายุและสร้าง Password รูปแบบ DDMMYY ปี พ.ศ. อัตโนมัติ</p></div>
+              <div className="flex gap-2 pt-2"><button type="button" onClick={() => setShowAddUserModal(false)} className="w-1/2 bg-slate-100 hover:bg-slate-200 py-3 rounded-xl font-bold cursor-pointer">ยกเลิก</button><button type="submit" disabled={isSavingUser} className="w-1/2 bg-[#00914E] hover:bg-[#00703c] disabled:opacity-50 text-white py-3 rounded-xl font-extrabold cursor-pointer">{isSavingUser ? 'กำลังบันทึก...' : 'บันทึกพนักงาน'}</button></div>
             </form>
-
           </div>
         </div>
       )}
 
-      {/* MODAL 2: TICKET ADJUST SELECTOR */}
       {adjustingUser && (
-        <div className="fixed inset-0 bg-[#000000]/60 backdrop-blur-xs flex items-center justify-center z-55 p-4 animate-fade-in">
-          <div className="bg-white max-w-sm w-full rounded-3xl border border-slate-100 shadow-2xl p-6 relative overflow-hidden space-y-4">
-            
-            <div className="flex items-center justify-between border-b border-gray-150 pb-3">
-              <h3 className="text-sm font-extrabold text-black flex items-center gap-2">
-                <Ticket className="w-5 h-5 text-amber-500" />
-                ปรับยอดสิทธิ "ตั๋วทองจับฉลาก"
-              </h3>
-              <button
-                onClick={() => setAdjustingUser(null)}
-                className="text-slate-400 hover:text-black font-bold text-sm cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-3 bg-[#E8F5E9] rounded-2xl flex items-center gap-3">
-              <div className="bg-[#00914E] text-white w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm">
-                {adjustingUser.nickname[0] || 'U'}
-              </div>
-              <div>
-                <p className="font-extrabold text-xs text-black">{adjustingUser.name}</p>
-                <p className="text-[10px] text-slate-600 font-semibold">{adjustingUser.employeeId} • ฝ่ายย่อย</p>
-              </div>
-            </div>
-
-            <div className="space-y-2 text-center py-4">
-              <p className="text-xs font-bold text-slate-400">ยอดตั๋วปัจจุบัน: <strong className="text-black font-mono text-sm">{adjustingUser.totalTickets} ใบ</strong></p>
-              
-              <div className="flex items-center justify-center gap-4 mt-3">
-                <button
-                  type="button"
-                  onClick={() => setTicketDelta(prev => prev - 1)}
-                  className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center font-black text-lg text-slate-700 cursor-pointer transition-colors"
-                >
-                  -
-                </button>
-                <div className="text-2xl font-black font-mono w-14">
-                  {ticketDelta > 0 ? `+${ticketDelta}` : ticketDelta}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setTicketDelta(prev => prev + 1)}
-                  className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center font-black text-lg text-slate-700 cursor-pointer transition-colors"
-                >
-                  +
-                </button>
-              </div>
-
-              <div className="text-[10px] text-amber-600/90 font-bold mt-2">
-                ยอดตั๋วใหม่ที่จะเซฟลงฐานข้อมูล: <span className="font-mono">{Math.max(0, adjustingUser.totalTickets + ticketDelta)} ใบ</span>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setAdjustingUser(null)}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                ย้อนกลับ
-              </button>
-              <button
-                onClick={handleUpdateTickets}
-                disabled={isUpdatingTickets}
-                className="w-1/2 bg-[#00914E] hover:bg-[#00703c] disabled:bg-slate-350 text-white py-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-sm"
-              >
-                {isUpdatingTickets ? 'กำลังเซฟไฟล์...' : 'บันทึกยอดตั๋ว'}
-              </button>
-            </div>
-
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+          <div className="bg-white max-w-sm w-full rounded-2xl shadow-2xl p-6">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100"><h3 className="font-black text-black flex items-center gap-2"><Ticket className="w-5 h-5 text-amber-500" />ปรับจำนวนตั๋ว</h3><button onClick={() => setAdjustingUser(null)} className="text-slate-400 hover:text-black cursor-pointer">✕</button></div>
+            <div className="mt-5 bg-[#E8F5E9] rounded-xl p-4"><p className="font-extrabold text-black text-sm">{adjustingUser.name} ({adjustingUser.nickname})</p><p className="text-[10px] text-slate-500 mt-1">{adjustingUser.employeeId} · ปัจจุบัน {adjustingUser.totalTickets || 0} ใบ</p></div>
+            <div className="flex items-center justify-center gap-5 py-8"><button onClick={() => setTicketDelta((value) => value - 1)} className="w-10 h-10 rounded-full bg-slate-100 text-lg font-black cursor-pointer">−</button><span className="text-3xl font-black tabular-nums w-20 text-center">{ticketDelta > 0 ? `+${ticketDelta}` : ticketDelta}</span><button onClick={() => setTicketDelta((value) => value + 1)} className="w-10 h-10 rounded-full bg-slate-100 text-lg font-black cursor-pointer">+</button></div>
+            <p className="text-center text-xs font-bold text-amber-700">ยอดใหม่: {Math.max(0, Number(adjustingUser.totalTickets || 0) + ticketDelta)} ใบ</p>
+            <div className="flex gap-2 mt-5"><button onClick={() => setAdjustingUser(null)} className="w-1/2 bg-slate-100 py-3 rounded-xl font-bold text-xs cursor-pointer">ยกเลิก</button><button onClick={handleUpdateTickets} disabled={isUpdatingTickets} className="w-1/2 bg-[#00914E] text-white py-3 rounded-xl font-extrabold text-xs cursor-pointer disabled:opacity-50">{isUpdatingTickets ? 'กำลังบันทึก...' : 'ยืนยัน'}</button></div>
           </div>
         </div>
       )}
-
     </div>
   );
 }

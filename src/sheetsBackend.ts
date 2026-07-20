@@ -63,6 +63,15 @@ export async function seedInitialDataIfNecessary() {
   }
 }
 
+
+export async function verifyAdminLogin(username: string, password: string): Promise<boolean> {
+  const result = await sheetsRequest<{ authenticated: boolean }>('verifyAdmin', {
+    username: username.trim(),
+    password
+  });
+  return Boolean(result.authenticated);
+}
+
 export async function verifyEmployeeLogin(employeeId: string, password: string): Promise<LoginResult> {
   const result = await sheetsRequest<LoginResult>('verifyLogin', {
     employeeId: employeeId.trim(),

@@ -41,6 +41,29 @@ export default async function handler(req: any, res: any) {
     });
   }
 
+  const body = readBody(req);
+
+  if (body.action === 'verifyAdmin') {
+    const adminUsername = process.env.ADMIN_USERNAME;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+
+    if (!adminUsername || !adminPassword) {
+      return res.status(500).setHeader('Content-Type', jsonHeaders['Content-Type']).json({
+        ok: false,
+        error: 'Admin credentials are not configured on Vercel'
+      });
+    }
+
+    const valid = String(body.username || '').trim() === adminUsername &&
+      String(body.password || '') === adminPassword;
+
+    return res.status(valid ? 200 : 401).setHeader('Content-Type', jsonHeaders['Content-Type']).json({
+      ok: valid,
+      data: valid ? { authenticated: true } : undefined,
+      error: valid ? undefined : 'ชื่อผู้ใช้หรือรหัสผ่าน Admin ไม่ถูกต้อง'
+    });
+  }
+
   const scriptUrl = process.env.GOOGLE_APPS_SCRIPT_URL;
   if (!scriptUrl) {
     return res.status(500).setHeader('Content-Type', jsonHeaders['Content-Type']).json({
@@ -50,7 +73,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const body = readBody(req);
     const upstream = await fetch(scriptUrl, {
       method: 'POST',
       headers: {

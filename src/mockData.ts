@@ -1,4 +1,5 @@
 import { DepartmentInfo, ActiveUser, StepLog, WeekConfig } from './types';
+import { CAMPAIGN_MONTHS } from './campaignConfig';
 
 export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   {
@@ -226,35 +227,8 @@ export const INITIAL_STEP_LOGS: StepLog[] = [
   }
 ];
 
-export const ACTIVE_WEEKS: WeekConfig[] = [
-  {
-    number: 1,
-    startDate: 'กรกฎาคม 2026',
-    endDate: ''
-  },
-  {
-    number: 2,
-    startDate: 'สิงหาคม 2026',
-    endDate: ''
-  },
-  {
-    number: 3,
-    startDate: 'กันยายน 2026',
-    endDate: ''
-  },
-  {
-    number: 4,
-    startDate: 'ตุลาคม 2026',
-    endDate: ''
-  },
-  {
-    number: 5,
-    startDate: 'พฤศจิกายน 2026',
-    endDate: ''
-  },
-  {
-    number: 6,
-    startDate: 'ธันวาคม 2026',
-    endDate: ''
-  }
-];
+export const ACTIVE_WEEKS: WeekConfig[] = CAMPAIGN_MONTHS.map((month) => ({
+  number: month.number,
+  startDate: month.label,
+  endDate: ''
+}));

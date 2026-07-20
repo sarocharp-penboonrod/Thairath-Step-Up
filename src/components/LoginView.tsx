@@ -4,6 +4,7 @@ import { ActiveUser, DepartmentInfo } from '../types';
 import { 
   seedInitialDataIfNecessary, 
   verifyEmployeeLogin,
+  verifyAdminLogin,
   createUserOrUpdateProfile
 } from '../sheetsBackend';
 
@@ -57,25 +58,23 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
 
       setLoading(true);
       try {
-        // Universal Back-end Access Code: Bay's employee ID 100202, or "admin", bypass pin 240845 / 999999
-        if (
-          (cleanId === '100202' || cleanId.toLowerCase() === 'admin' || cleanId.toLowerCase() === 'bay') && 
-          (cleanPassword === '240845' || cleanPassword === '999999')
-        ) {
-          onLoginSuccess({
-            employeeId: '100202',
-            email: 'worapong.b@thairathgroup.com',
-            name: 'คุณวรพงษ์ (เบ) - ผู้ดูแลระบบ',
-            nickname: 'Admin',
-            departmentId: 'prod_tech_tech',
-            weekTarget: 60000,
-            totalTickets: 99
-          });
-        } else {
-          setSigninError('รหัสผู้ดูแลหลังบ้าน (Admin Logins / Passcode) ไม่ถูกต้อง กรุณาลองอีกครั้ง');
+        const authenticated = await verifyAdminLogin(cleanId, cleanPassword);
+        if (!authenticated) {
+          setSigninError('ชื่อผู้ใช้หรือรหัสผ่าน Admin ไม่ถูกต้อง');
+          return;
         }
+
+        onLoginSuccess({
+          employeeId: 'ADMIN',
+          email: 'admin@thairathgroup.com',
+          name: 'ผู้ดูแลระบบ Thairath Step Up',
+          nickname: 'Admin',
+          departmentId: 'admin',
+          weekTarget: 60000,
+          totalTickets: 0
+        });
       } catch (err: any) {
-        setSigninError('เกิดข้อผิดพลาดในการตรวจสอบสิทธิ์แอดมิน: ' + err.message);
+        setSigninError(err.message || 'เกิดข้อผิดพลาดในการตรวจสอบสิทธิ์ Admin');
       } finally {
         setLoading(false);
       }
@@ -190,17 +189,17 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
         <div className="mb-4 max-w-[290px] mx-auto select-none">
           <svg viewBox="0 0 350 135" className="w-full h-auto filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.01)]" fill="none" xmlns="http://www.w3.org/2000/svg">
             {/* THAIRATH Green Text */}
-            <text x="50%" y="44" textAnchor="middle" fill="#00914E" style={{ fontSize: '38px', fontWeight: '900', fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '0.04em' }}>
+            <text x="50%" y="44" textAnchor="middle" fill="#00914E" style={{ fontSize: '38px', fontWeight: '900', fontFamily: 'Prompt, sans-serif', letterSpacing: '0.04em' }}>
               THAIRATH
             </text>
             
             {/* HEALTH Wordmark on Left */}
-            <text x="68" y="80" fill="#000000" style={{ fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: '800', fontSize: '28px' }} letterSpacing="0.01em">
+            <text x="68" y="80" fill="#000000" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '800', fontSize: '28px' }} letterSpacing="0.01em">
               HEALTH
             </text>
 
             {/* Up! Wordmark on Right */}
-            <text x="208" y="80" fill="#00914E" style={{ fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: '900', fontSize: '28px' }} letterSpacing="0.01em">
+            <text x="208" y="80" fill="#00914E" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '900', fontSize: '28px' }} letterSpacing="0.01em">
               Up!
             </text>
 
