@@ -313,7 +313,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button onClick={onExit} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
-            <div><p className="font-black text-lg">Thairath Step Up Admin</p><p className="text-[10px] text-slate-400">Evidence Verification · v2.2</p></div>
+            <div><p className="font-black text-lg">Thairath Step Up Admin</p><p className="text-[10px] text-slate-400">Evidence Verification · OCR v2.3</p></div>
           </div>
           <div className="flex gap-2">
             <a href={DATABASE_URL} target="_blank" rel="noreferrer" className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2"><FileSpreadsheet className="w-4 h-4" />Google Sheets<ExternalLink className="w-3 h-3" /></a>

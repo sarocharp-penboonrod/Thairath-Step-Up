@@ -138,7 +138,7 @@ export default function SubmissionView({
         setOcrResult(result);
       } catch (ocrError) {
         console.warn('OCR failed, submission will require review:', ocrError);
-        setOcrResult({ text: '', confidence: 0 });
+        setOcrResult({ text: '', confidence: 0, agreementCount: 0, passCount: 3, alternatives: [] });
         setOcrStatusText('OCR อ่านรูปไม่สำเร็จ ระบบจะส่งให้ Admin ตรวจ');
       }
     } catch (error: any) {
@@ -353,7 +353,11 @@ export default function SubmissionView({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-white rounded-xl p-3 border border-slate-100"><p className="text-[10px] text-slate-400 font-bold">OCR พบยอด</p><p className="text-xl font-black text-black mt-1">{ocrResult.detectedSteps?.toLocaleString() || 'อ่านไม่พบ'}</p></div>
-                  <div className="bg-white rounded-xl p-3 border border-slate-100"><p className="text-[10px] text-slate-400 font-bold">ความมั่นใจ</p><p className="text-xl font-black text-black mt-1">{ocrResult.confidence}%</p></div>
+                  <div className="bg-white rounded-xl p-3 border border-slate-100"><p className="text-[10px] text-slate-400 font-bold">ผลอ่านตรงกัน</p><p className="text-xl font-black text-black mt-1">{ocrResult.agreementCount}/{ocrResult.passCount} รอบ</p></div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
+                  <p className="font-bold text-slate-500">ความมั่นใจรวม {ocrResult.confidence}%</p>
+                  {ocrResult.alternatives.length > 0 && <p className="text-amber-700">เลขอื่นที่พบ: {ocrResult.alternatives.map((value) => value.toLocaleString()).join(', ')}</p>}
                 </div>
                 <p className="text-[10px] text-slate-500">{statusPreview.description}</p>
               </div>

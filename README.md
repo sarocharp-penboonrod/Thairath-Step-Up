@@ -1,23 +1,34 @@
-# Thairath Step Up & Health Up — v2.2.0
+# Thairath Step Up & Health Up — v2.3.0
 
 ระบบกิจกรรมส่งเสริมสุขภาพสำหรับพนักงาน Thairath Logistics รองรับการส่งยอดก้าวรายสัปดาห์ พร้อม Screenshot หลักฐาน, OCR ด้วย Tesseract.js, การเก็บไฟล์ใน Google Drive และ Workflow ตรวจหลักฐานโดย Admin
 
-> **Release:** v2.2.0 — Evidence Verification & Drive Upload  
+> **Release:** v2.3.0 — Free Multi-pass OCR & Evidence Verification  
 > **Production:** https://thairath-step-up.vercel.app/  
 > **Evidence Root Folder ID:** `1aA_KkQN8Q-x8XPO_LrCLxlKXEGNH4g4R`
 
 ---
 
-## 1. สิ่งที่เปลี่ยนใน v2.2
+## 1. สิ่งที่เปลี่ยนใน v2.3 — Free OCR Improvement
 
-### 1.1 Logic เป้าหมาย 7,000 ก้าว
+- ยังคงใช้ `Tesseract.js` ใน Browser เท่านั้น ไม่มีค่า API และไม่ต้องใช้ API Key
+- เตรียมภาพ OCR อัตโนมัติ 3 แบบ: ภาพต้นฉบับ, ภาพเพิ่ม Contrast และภาพ Binary ขาวดำ
+- OCR ภาพเดียวกัน 3 รอบด้วย Worker เดียว เพื่อลดเวลาโหลดโมเดลซ้ำ
+- ใช้ Consensus เลือกเลขที่ปรากฏตรงกันข้ามหลายรอบ แทนการเลือกเลขใหญ่ที่สุดจากรอบเดียว
+- ตัด Candidate ที่มีลักษณะเป็นเวลา วันที่ เปอร์เซ็นต์ หรือเลขทศนิยม เช่น `10:42`, `20/07`, `5.72`
+- ลดคะแนนตัวเลขที่อยู่ใกล้คำว่า `km`, `kcal`, `distance`, `goal`, `target` และเพิ่มคะแนนเลขที่อยู่ใกล้ `steps`
+- ถ้าผลตรงกันเพียง 1 รอบ ระบบจำกัด Confidence ไม่เกิน 59% และส่งเข้า `NEEDS_REVIEW`
+- หน้า Submission แสดงผล `อ่านตรงกัน X/3 รอบ` และเลข Candidate อื่นที่ตรวจพบ
+
+## 2. ฟังก์ชันหลักจาก v2.2
+
+### 2.1 Logic เป้าหมาย 7,000 ก้าว
 
 - ยอดที่พนักงานกรอกถูกเทียบกับเป้าหมาย `7,000 ก้าวต่อสัปดาห์` โดยตรง
 - ไม่มีการหารด้วยจำนวนวันของสัปดาห์
 - รายการที่ผ่านตรวจและมียอดตั้งแต่ 7,000 ก้าวขึ้นไป ได้รับ 1 คูปอง
 - Dashboard, Leaderboard และคูปอง ใช้เฉพาะรายการที่มีสถานะ `AUTO_VERIFIED` หรือ `APPROVED`
 
-### 1.2 Upload หลักฐานเข้า Google Drive
+### 2.2 Upload หลักฐานเข้า Google Drive
 
 เมื่อพนักงานส่งผล ระบบจะ:
 
@@ -42,15 +53,15 @@ Root Evidence Folder
     └── Week_02
 ```
 
-### 1.3 OCR ด้วย Tesseract.js
+### 2.3 OCR ด้วย Tesseract.js
 
-- OCR ทำงานใน Browser ก่อนส่งข้อมูล
-- ระบบเลือกตัวเลขที่มีขนาดใหญ่ที่สุดในภาพเป็น Candidate หลัก
-- ใช้ภาษา OCR `eng` และจำกัด Character เป็นตัวเลข, comma และ decimal point
-- เก็บ `ocrText`, `ocrSteps` และ `ocrConfidence` ลง Google Sheets
-- ถ้า OCR ล้มเหลว พนักงานยังส่งได้ แต่สถานะจะเป็น `NEEDS_REVIEW`
+- OCR ทำงานใน Browser ก่อนส่งข้อมูลและไม่มีค่าใช้จ่ายต่อรูป
+- ระบบอ่านภาพ 3 รูปแบบและใช้ Consensus จากหลายรอบ
+- Candidate ถูกจัดคะแนนจากขนาด ตำแหน่ง Confidence และข้อความรอบตัว
+- เก็บผล OCR ทั้ง 3 รอบรวมไว้ใน `ocrText` พร้อม `ocrSteps` และ `ocrConfidence`
+- ถ้า OCR ล้มเหลวหรือผลไม่เห็นตรงกัน พนักงานยังส่งได้ แต่สถานะจะเป็น `NEEDS_REVIEW`
 
-### 1.4 Verification Status
+### 2.4 Verification Status
 
 | Status | ความหมาย | นำไปคำนวณหรือไม่ |
 |---|---|---|
@@ -61,7 +72,7 @@ Root Evidence Folder
 
 > Backend เป็นผู้ตัดสินสถานะเริ่มต้นอีกครั้ง ไม่เชื่อสถานะที่ Frontend ส่งมาโดยตรง
 
-### 1.5 Admin Evidence Review
+### 2.5 Admin Evidence Review
 
 หน้า Admin เพิ่ม Tab `ตรวจหลักฐาน` พร้อมความสามารถ:
 
@@ -74,7 +85,7 @@ Root Evidence Folder
 
 ---
 
-## 2. Architecture
+## 3. Architecture
 
 ```text
 Employee / Admin Browser
@@ -100,7 +111,7 @@ Google Apps Script Web App
 
 ---
 
-## 3. Technology Stack
+## 4. Technology Stack
 
 | Layer | Technology |
 |---|---|
@@ -116,7 +127,7 @@ Google Apps Script Web App
 
 ---
 
-## 4. Project Structure
+## 5. Project Structure
 
 ```text
 Thairath-Step-Up/
@@ -258,7 +269,7 @@ Push Source Code ไป GitHub แล้ว Deploy ผ่าน Vercel ตาม
 
 แนวทาง Migration:
 
-1. Deploy `Code.gs` v2.2
+1. Deploy `Code.gs` v2.2 ขึ้นไป (OCR v2.3 ไม่ต้องแก้ Backend)
 2. เปิด Web App URL หนึ่งครั้ง เพื่อให้ระบบเติม Header
 3. เข้า Admin → ตรวจหลักฐาน
 4. Approve / Reject รายการเดิม
