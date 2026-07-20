@@ -1,5 +1,6 @@
 import { ActiveUser, StepLog, DepartmentInfo } from './types';
 import { INITIAL_DEPARTMENTS } from './mockData';
+import { CAMPAIGN_WEEKLY_TARGET } from './campaignConfig';
 
 type ApiEnvelope<T> = {
   ok: boolean;
@@ -48,7 +49,7 @@ function withSafeDepartment(profile: ActiveUser): ActiveUser {
   return {
     ...profile,
     departmentId: departmentId || INITIAL_DEPARTMENTS[0]?.id || 'ceo',
-    weekTarget: Number(profile.weekTarget) || 60000,
+    weekTarget: CAMPAIGN_WEEKLY_TARGET,
     totalTickets: Number(profile.totalTickets) || 0,
     age: profile.age ? Number(profile.age) : undefined
   };

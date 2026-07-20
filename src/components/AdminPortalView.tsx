@@ -26,7 +26,7 @@ import {
   updateUserTickets
 } from '../sheetsBackend';
 import { ActiveUser, DepartmentInfo, StepLog } from '../types';
-import { CAMPAIGN_MONTHS, getDefaultCampaignMonth, getCampaignMonth } from '../campaignConfig';
+import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET, getDefaultCampaignMonth, getCampaignMonth } from '../campaignConfig';
 
 interface AdminPortalViewProps {
   departments: DepartmentInfo[];
@@ -314,7 +314,7 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
         surname: newEmpSurname.trim(),
         nickname: newEmpNickname.trim(),
         departmentId: newEmpDept,
-        weekTarget: 60000,
+        weekTarget: CAMPAIGN_WEEKLY_TARGET,
         totalTickets: 0,
         dateOfBirth: newEmpBirthDate
       };

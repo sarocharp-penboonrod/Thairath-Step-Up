@@ -25,7 +25,7 @@ export interface ActiveUser {
   Surename?: string; // kept for Google Sheets header compatibility
   nickname: string;
   departmentId: string;
-  weekTarget: number; // e.g. 60000
+  weekTarget: number; // campaign standard: 7000
   totalTickets: number; // cumulative tickets across weeks
   email?: string;
   employeeId?: string;

@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Lock, User, Building2, ArrowRight, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { ActiveUser, DepartmentInfo } from '../types';
 import { 
-  seedInitialDataIfNecessary, 
   verifyEmployeeLogin,
   verifyAdminLogin,
   createUserOrUpdateProfile
 } from '../sheetsBackend';
+import { CAMPAIGN_WEEKLY_TARGET } from '../campaignConfig';
 
 interface LoginViewProps {
   departments: DepartmentInfo[];
@@ -29,14 +29,6 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
   const [newNickname, setNewNickname] = useState('');
   const [newDept, setNewDept] = useState(departments[0]?.id || 'ceo');
   const [newUserError, setNewUserError] = useState('');
-
-  // Seed on initial mount
-  useEffect(() => {
-    async function initDb() {
-      await seedInitialDataIfNecessary();
-    }
-    initDb();
-  }, []);
 
   const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,7 +62,7 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
           name: 'ผู้ดูแลระบบ Thairath Step Up',
           nickname: 'Admin',
           departmentId: 'admin',
-          weekTarget: 60000,
+          weekTarget: CAMPAIGN_WEEKLY_TARGET,
           totalTickets: 0
         });
       } catch (err: any) {
@@ -140,7 +132,7 @@ export default function LoginView({ departments, onLoginSuccess }: LoginViewProp
         name: pendingProfile?.name || `คุณ${displayNickname}`,
         nickname: displayNickname,
         departmentId: newDept,
-        weekTarget: pendingProfile?.weekTarget || 60000,
+        weekTarget: CAMPAIGN_WEEKLY_TARGET,
         totalTickets: pendingProfile?.totalTickets ?? 2,
         email: pendingProfile?.email || `${cleanId}@thairathgroup.com`,
         employeeId: cleanId,

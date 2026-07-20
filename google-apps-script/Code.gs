@@ -10,7 +10,8 @@ const CONFIG = {
   SPREADSHEET_ID: '1YgxxKpP74EkzfzAJn2wnTXamrYJ9-aBZsKwcBo7v3Dk',
   EMPLOYEE_SHEET: 'Employees',
   LOG_SHEET: 'StepLogs',
-  TIMEZONE: 'Asia/Bangkok'
+  TIMEZONE: 'Asia/Bangkok',
+  WEEKLY_TARGET: 7000
 };
 
 const EMPLOYEE_HEADERS = [
@@ -79,7 +80,8 @@ function doPost(e) {
 
     switch (action) {
       case 'setup':
-        return json_({ ok: true, data: { ready: true } });
+        syncWeeklyTarget_();
+        return json_({ ok: true, data: { ready: true, weeklyTarget: CONFIG.WEEKLY_TARGET } });
       case 'verifyLogin':
         return json_({ ok: true, data: verifyLogin_(body.employeeId, body.password) });
       case 'getUserProfile':
@@ -133,6 +135,27 @@ function ss_() {
 function setup_() {
   ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
   ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
+}
+
+function migrateWeeklyTargetTo7000() {
+  setup_();
+  syncWeeklyTarget_();
+}
+
+function syncWeeklyTarget_() {
+  const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const targetColumn = EMPLOYEE_HEADERS.indexOf('weekTarget') + 1;
+  if (targetColumn <= 0) return;
+
+  const range = sheet.getRange(2, targetColumn, lastRow - 1, 1);
+  const currentValues = range.getValues();
+  const needsUpdate = currentValues.some(row => Number(row[0]) !== CONFIG.WEEKLY_TARGET);
+  if (!needsUpdate) return;
+
+  range.setValues(currentValues.map(() => [CONFIG.WEEKLY_TARGET]));
 }
 
 function ensureSheet_(sheetName, headers) {
@@ -354,7 +377,7 @@ function employeeToProfile_(row) {
     surname: surname,
     nickname: nickname,
     departmentId: canonicalDepartmentId_(row.departmentId) || 'ceo',
-    weekTarget: number_(row.weekTarget, 60000),
+    weekTarget: CONFIG.WEEKLY_TARGET,
     totalTickets: number_(row.totalTickets, 0),
     email: String(row.email || (employeeId ? employeeId + '@thairathgroup.com' : '')).trim(),
     employeeId: employeeId,
@@ -442,7 +465,7 @@ function saveUserProfile_(idOrEmail, profile, password) {
     profile.surname || profile.Surename || (existing ? existing.Surename : ''),
     profile.nickname || (existing ? existing.nickname : ''),
     canonicalDepartmentId_(profile.departmentId || (existing ? existing.departmentId : 'ceo')) || 'ceo',
-    number_(profile.weekTarget, existing ? existing.weekTarget : 60000),
+    CONFIG.WEEKLY_TARGET,
     number_(profile.totalTickets, existing ? existing.totalTickets : 0),
     profile.email || (existing ? existing.email : employeeId + '@thairathgroup.com'),
     'Active',

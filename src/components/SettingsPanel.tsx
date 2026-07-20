@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, Sliders, UserCheck, Check, Building, Goal, BadgeInfo } from 'lucide-react';
 import { ActiveUser, DepartmentInfo } from '../types';
+import { CAMPAIGN_WEEKLY_TARGET } from '../campaignConfig';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -91,7 +92,7 @@ export default function SettingsPanel({
             />
             <InfoRow
               label="เป้าหมายต่อสัปดาห์"
-              value={`${Number(activeUser.weekTarget || 60000).toLocaleString('th-TH')} ก้าว`}
+              value={`${CAMPAIGN_WEEKLY_TARGET.toLocaleString('th-TH')} ก้าว`}
               icon={<Goal className="w-3.5 h-3.5 text-orange-500" />}
             />
           </section>

@@ -19,7 +19,8 @@ import {
   fetchUserLogs, 
   saveUserLog, 
   deleteUserLog, 
-  calculateSheetsLeaderboard 
+  calculateSheetsLeaderboard,
+  seedInitialDataIfNecessary
 } from './sheetsBackend';
 import { getDefaultCampaignMonth } from './campaignConfig';
 
@@ -57,6 +58,12 @@ export default function App() {
   }, [isAdminMode]);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [dbSyncing, setDbSyncing] = useState<boolean>(false);
+
+  // Ensure Google Sheets schema and the campaign-wide 7,000-step target are synced
+  // even when the browser restores an existing login session.
+  useEffect(() => {
+    seedInitialDataIfNecessary();
+  }, []);
 
   // Sync to LocalStorage (Identity mapping)
   useEffect(() => {

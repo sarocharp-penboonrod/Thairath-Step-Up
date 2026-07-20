@@ -16,10 +16,11 @@ import {
 import { ActiveUser, StepLog, WeekConfig } from '../types';
 import {
   CAMPAIGN_MONTHS,
+  CAMPAIGN_WEEKLY_TARGET,
   countDaysInclusive,
   getCampaignMonth,
   getCampaignWeek,
-  getOpenedCampaignWeeks,
+  getCampaignWeeksThroughMonth,
   periodKey
 } from '../campaignConfig';
 
@@ -76,7 +77,7 @@ export default function DashboardView({
   setCurrentWeek
 }: DashboardViewProps) {
   const selectedMonth = getCampaignMonth(currentWeek);
-  const weeklyTarget = Number(activeUser.weekTarget) || 60000;
+  const weeklyTarget = CAMPAIGN_WEEKLY_TARGET;
   const allPeriods = buildPeriodSummaries(stepLogs);
   const selectedPeriods = allPeriods.filter((period) => period.monthNumber === currentWeek);
   const selectedMonthLogs = stepLogs.filter((log) => Number(log.week) === currentWeek);
@@ -88,15 +89,17 @@ export default function DashboardView({
   const submittedWeeks = selectedPeriods.filter((period) => period.weekNumber > 0).length;
   const completedMonthWeeks = selectedPeriods.filter((period) => period.steps >= weeklyTarget).length;
 
-  const totalSteps = allPeriods.reduce((sum, period) => sum + period.steps, 0);
-  const submittedPeriodKeys = new Set(allPeriods.map((period) => period.key));
-  const openedPeriods = getOpenedCampaignWeeks();
-  const targetPeriodKeys = new Set(openedPeriods.map(({ monthNumber, week }) => periodKey(monthNumber, week.number)));
-  submittedPeriodKeys.forEach((key) => targetPeriodKeys.add(key));
-  const targetWeeksToDate = Math.max(1, targetPeriodKeys.size);
+  // Overall Journey follows the selected month. A selected month always counts every
+  // configured week in that month, even when the final week has not started yet.
+  // Example: July has four campaign weeks, so the cumulative plan is 4 × 7,000.
+  const cumulativePeriods = allPeriods.filter((period) => period.monthNumber <= currentWeek);
+  const totalSteps = cumulativePeriods.reduce((sum, period) => sum + period.steps, 0);
+  const submittedPeriodKeys = new Set(cumulativePeriods.map((period) => period.key));
+  const plannedPeriods = getCampaignWeeksThroughMonth(currentWeek);
+  const targetWeeksToDate = plannedPeriods.length;
   const targetToDate = targetWeeksToDate * weeklyTarget;
   const overallProgress = targetToDate > 0 ? Math.round((totalSteps / targetToDate) * 100) : 0;
-  const completedWeeks = allPeriods.filter((period) => period.steps >= weeklyTarget).length;
+  const completedWeeks = cumulativePeriods.filter((period) => period.steps >= weeklyTarget).length;
 
   const coveredDays = selectedPeriods.reduce((sum, period) => {
     const campaignWeek = getCampaignWeek(period.monthNumber, period.weekNumber);
@@ -144,7 +147,7 @@ export default function DashboardView({
 
   const journeyCards = [
     {
-      label: 'ก้าวสะสมทั้งโครงการ',
+      label: 'ก้าวสะสมถึงเดือนที่เลือก',
       value: totalSteps.toLocaleString(),
       suffix: 'ก้าว',
       helper: `จาก ${submittedPeriodKeys.size} สัปดาห์ที่ส่งผล`,
@@ -152,10 +155,10 @@ export default function DashboardView({
       iconClass: 'bg-emerald-50 text-[#00914E]'
     },
     {
-      label: 'เป้าหมายสะสมถึงปัจจุบัน',
+      label: 'เป้าหมายสะสมตามแผน',
       value: targetToDate.toLocaleString(),
       suffix: 'ก้าว',
-      helper: `${targetWeeksToDate} สัปดาห์ × ${weeklyTarget.toLocaleString()}`,
+      helper: `${targetWeeksToDate} สัปดาห์ × ${weeklyTarget.toLocaleString()} ก้าว`,
       icon: Target,
       iconClass: 'bg-blue-50 text-blue-600'
     },
@@ -193,7 +196,7 @@ export default function DashboardView({
             ยินดีต้อนรับสู่ THAIRATH STEP UP
           </h2>
           <p className="text-xs md:text-sm text-[#475467] font-medium">
-            ดูภาพรวมทั้งโครงการ พร้อมติดตามผลงานรายเดือนและรายสัปดาห์ของคุณ
+            ดูเป้าหมายสะสมตามแผน พร้อมติดตามผลงานรายเดือนและรายสัปดาห์ของคุณ
           </p>
         </div>
 
@@ -219,7 +222,7 @@ export default function DashboardView({
             <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#00914E]">Overall Journey</p>
             <h3 id="overall-journey-title" className="text-base md:text-lg font-black text-black">ภาพรวมสะสมทั้งโครงการ</h3>
           </div>
-          <p className="hidden md:block text-xs text-slate-500 font-medium">อัปเดตจากรายการส่งผลทั้งหมดของคุณ</p>
+          <p className="hidden md:block text-xs text-slate-500 font-medium">คำนวณตามสัปดาห์ทั้งหมดจนถึงเดือนที่เลือก</p>
         </div>
 
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">

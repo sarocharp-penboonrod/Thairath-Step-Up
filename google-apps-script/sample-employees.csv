@@ -1,3 +1,3 @@
 employeeId,password,dateOfBirth,name,Surename,nickname,departmentId,weekTarget,totalTickets,email,status,createdAt,updatedAt,lastLoginAt,lastSubmitAt
-123456,020826,02/08/2526,สมชาย,ใจดี,ชาย,OPERATION,60000,0,somchai.j@thairath.co.th,Active,09/07/2026,09/07/2026,,
-234567,151240,15/12/2540,สมหญิง,รักสุขภาพ,หญิง,WAREHOUSE,60000,0,somying.r@thairath.co.th,Active,09/07/2026,09/07/2026,,
+123456,020826,02/08/2526,สมชาย,ใจดี,ชาย,OPERATION,7000,0,somchai.j@thairath.co.th,Active,09/07/2026,09/07/2026,,
+234567,151240,15/12/2540,สมหญิง,รักสุขภาพ,หญิง,WAREHOUSE,7000,0,somying.r@thairath.co.th,Active,09/07/2026,09/07/2026,,

@@ -13,6 +13,8 @@ export interface CampaignMonth {
   weeks: CampaignWeek[];
 }
 
+export const CAMPAIGN_WEEKLY_TARGET = 7000;
+
 export const CAMPAIGN_MONTHS: CampaignMonth[] = [
   {
     number: 1,
@@ -90,6 +92,12 @@ export function getCampaignMonth(monthNumber: number): CampaignMonth {
 export function getCampaignWeek(monthNumber: number, weekNumber?: number): CampaignWeek | undefined {
   if (!weekNumber) return undefined;
   return getCampaignMonth(monthNumber).weeks.find((week) => week.number === weekNumber);
+}
+
+export function getCampaignWeeksThroughMonth(monthNumber: number): Array<{ monthNumber: number; week: CampaignWeek }> {
+  return CAMPAIGN_MONTHS
+    .filter((month) => month.number <= monthNumber)
+    .flatMap((month) => month.weeks.map((week) => ({ monthNumber: month.number, week })));
 }
 
 export function countDaysInclusive(startDate: string, endDate: string): number {

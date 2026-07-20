@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Upload, CircleCheck, AlertTriangle, Flame, Calendar, Sparkles, HelpCircle } from 'lucide-react';
 import { ActiveUser, StepLog } from '../types';
-import { CAMPAIGN_MONTHS, getCampaignMonth, getCampaignWeek } from '../campaignConfig';
+import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET, getCampaignMonth, getCampaignWeek } from '../campaignConfig';
 
 interface SubmissionViewProps {
   activeUser: ActiveUser;
@@ -216,7 +216,7 @@ export default function SubmissionView({
               </div>
               <div className="bg-white p-2.5 rounded-xl border border-gray-100">
                 <span className="text-gray-400 block">อัตราก้าวเป้าหมาย</span>
-                <span className="font-extrabold text-[#000000] text-base">{activeUser.weekTarget.toLocaleString()} ก้าว</span>
+                <span className="font-extrabold text-[#000000] text-base">{CAMPAIGN_WEEKLY_TARGET.toLocaleString()} ก้าว</span>
               </div>
             </div>
           </div>

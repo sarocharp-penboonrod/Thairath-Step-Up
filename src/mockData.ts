@@ -1,5 +1,5 @@
 import { DepartmentInfo, ActiveUser, StepLog, WeekConfig } from './types';
-import { CAMPAIGN_MONTHS } from './campaignConfig';
+import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET } from './campaignConfig';
 
 export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   {
@@ -170,7 +170,7 @@ export const INITIAL_USER: ActiveUser = {
   name: 'คุณวรพงษ์ (เบ)',
   nickname: 'เบ',
   departmentId: 'prod_tech_tech',
-  weekTarget: 60000,
+  weekTarget: CAMPAIGN_WEEKLY_TARGET,
   totalTickets: 5
 };
 
@@ -220,7 +220,7 @@ export const INITIAL_STEP_LOGS: StepLog[] = [
   {
     id: 'log-w1-total',
     date: '2026-05-21',
-    steps: 62450, // Exceeded 60,000 steps!
+    steps: 62450, // Exceeded the weekly target!
     week: 1,
     imageName: 'week1_final_report.png',
     submittedAt: '2026-05-22T10:11:00Z'
