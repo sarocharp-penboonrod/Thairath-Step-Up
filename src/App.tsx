@@ -4,7 +4,7 @@ import {
   INITIAL_USER, 
   ACTIVE_WEEKS 
 } from './mockData';
-import { ActiveUser, StepLog, DepartmentInfo } from './types';
+import { ActiveUser, StepLog, DepartmentInfo, NewStepLogInput } from './types';
 import Header from './components/Header';
 import DashboardView from './components/DashboardView';
 import SubmissionView from './components/SubmissionView';
@@ -20,7 +20,8 @@ import {
   saveUserLog, 
   deleteUserLog, 
   calculateSheetsLeaderboard,
-  seedInitialDataIfNecessary
+  seedInitialDataIfNecessary,
+  getUserProfile
 } from './sheetsBackend';
 import { getDefaultCampaignMonth } from './campaignConfig';
 
@@ -83,10 +84,13 @@ export default function App() {
     if (isLoggedIn && activeUser?.email) {
       setDbSyncing(true);
       try {
-        const fetchedLogs = await fetchUserLogs(activeUser.email);
+        const [fetchedLogs, refreshedProfile, lb] = await Promise.all([
+          fetchUserLogs(activeUser.email),
+          getUserProfile(activeUser.employeeId || activeUser.email),
+          calculateSheetsLeaderboard(currentWeek)
+        ]);
         setStepLogs(fetchedLogs);
-
-        const lb = await calculateSheetsLeaderboard(currentWeek);
+        if (refreshedProfile) setActiveUser(refreshedProfile);
         setDepartments(lb);
       } catch (err) {
         console.error('Error syncing with live Google Sheets:', err);
@@ -112,28 +116,9 @@ export default function App() {
   };
 
   // 3. Callback handlers with Cloud persistence
-  const handleAddLog = async (
-    steps: number, 
-    date: string, 
-    imageName: string, 
-    imagePreview?: string,
-    weekNumber?: number,
-    weekOfMonth?: number
-  ) => {
-    const targetWeek = weekNumber || currentWeek;
-    const newLog: StepLog = {
-      id: `log-${Date.now()}`,
-      steps,
-      date,
-      week: targetWeek,
-      weekOfMonth,
-      imageName,
-      imagePreview,
-      submittedAt: new Date().toISOString()
-    };
-
+  const handleAddLog = async (input: NewStepLogInput) => {
     const isDuplicate = stepLogs.some((log) =>
-      Number(log.week) === Number(targetWeek) && Number(log.weekOfMonth) === Number(weekOfMonth)
+      Number(log.week) === Number(input.week) && Number(log.weekOfMonth) === Number(input.weekOfMonth)
     );
     if (isDuplicate) {
       throw new Error('คุณส่งข้อมูลของเดือนและสัปดาห์นี้แล้ว กรุณาติดต่อ Admin หากต้องการแก้ไข');
@@ -145,10 +130,12 @@ export default function App() {
 
     setDbSyncing(true);
     try {
-      await saveUserLog(activeUser.email, newLog);
-      setStepLogs(prev => [newLog, ...prev]);
-      setActiveUser(prev => ({ ...prev, lastSubmitAt: newLog.submittedAt }));
+      const savedLog = await saveUserLog(activeUser.email, input);
+      setStepLogs((previous) => [savedLog, ...previous]);
+      const refreshedProfile = await getUserProfile(activeUser.employeeId || activeUser.email);
+      if (refreshedProfile) setActiveUser(refreshedProfile);
       await refreshLeaderboardOnly();
+      return savedLog;
     } catch (err) {
       console.error(err);
       throw err;
@@ -163,6 +150,10 @@ export default function App() {
       try {
         await deleteUserLog(id);
         setStepLogs(prev => prev.filter(log => log.id !== id));
+        const refreshedProfile = activeUser.email
+          ? await getUserProfile(activeUser.employeeId || activeUser.email)
+          : null;
+        if (refreshedProfile) setActiveUser(refreshedProfile);
         await refreshLeaderboardOnly();
       } catch (err) {
         console.error(err);

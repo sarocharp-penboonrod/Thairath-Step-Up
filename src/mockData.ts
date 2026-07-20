@@ -182,6 +182,7 @@ export const INITIAL_STEP_LOGS: StepLog[] = [
     steps: 8420,
     week: 2,
     imageName: 'health_tracker_sunday.png',
+    verificationStatus: 'AUTO_VERIFIED',
     submittedAt: '2026-05-24T18:30:00Z'
   },
   {
@@ -190,6 +191,7 @@ export const INITIAL_STEP_LOGS: StepLog[] = [
     steps: 7950,
     week: 2,
     imageName: 'apple_health_mon.png',
+    verificationStatus: 'AUTO_VERIFIED',
     submittedAt: '2026-05-25T19:15:00Z'
   },
   {
@@ -198,6 +200,7 @@ export const INITIAL_STEP_LOGS: StepLog[] = [
     steps: 11200,
     week: 2,
     imageName: 'google_fit_tue.png',
+    verificationStatus: 'AUTO_VERIFIED',
     submittedAt: '2026-05-26T20:02:00Z'
   },
   {
@@ -206,6 +209,7 @@ export const INITIAL_STEP_LOGS: StepLog[] = [
     steps: 9140,
     week: 2,
     imageName: 'screenshot_wed.png',
+    verificationStatus: 'AUTO_VERIFIED',
     submittedAt: '2026-05-27T17:45:00Z'
   },
   {
@@ -214,6 +218,7 @@ export const INITIAL_STEP_LOGS: StepLog[] = [
     steps: 8500,
     week: 2,
     imageName: 'garmin_connect_thurs.png',
+    verificationStatus: 'AUTO_VERIFIED',
     submittedAt: '2026-05-28T15:00:00Z'
   },
   // Week 1 historic logs that brought 4 tickets
@@ -223,6 +228,7 @@ export const INITIAL_STEP_LOGS: StepLog[] = [
     steps: 62450, // Exceeded the weekly target!
     week: 1,
     imageName: 'week1_final_report.png',
+    verificationStatus: 'AUTO_VERIFIED',
     submittedAt: '2026-05-22T10:11:00Z'
   }
 ];

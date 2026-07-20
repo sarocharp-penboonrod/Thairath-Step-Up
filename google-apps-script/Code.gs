@@ -11,7 +11,9 @@ const CONFIG = {
   EMPLOYEE_SHEET: 'Employees',
   LOG_SHEET: 'StepLogs',
   TIMEZONE: 'Asia/Bangkok',
-  WEEKLY_TARGET: 7000
+  WEEKLY_TARGET: 7000,
+  OCR_AUTO_VERIFY_MIN_CONFIDENCE: 60,
+  EVIDENCE_ROOT_FOLDER_ID: '1aA_KkQN8Q-x8XPO_LrCLxlKXEGNH4g4R'
 };
 
 const EMPLOYEE_HEADERS = [
@@ -43,7 +45,16 @@ const LOG_HEADERS = [
   'imageName',
   'submittedAt',
   'createdAt',
-  'updatedAt'
+  'updatedAt',
+  'imageFileId',
+  'imageUrl',
+  'ocrText',
+  'ocrSteps',
+  'ocrConfidence',
+  'verificationStatus',
+  'reviewNote',
+  'reviewedBy',
+  'reviewedAt'
 ];
 
 const DEPARTMENTS = [
@@ -92,8 +103,9 @@ function doPost(e) {
       case 'fetchUserLogs':
         return json_({ ok: true, data: fetchUserLogs_(body.userKey) });
       case 'saveUserLog':
-        saveUserLog_(body.userKey, body.log);
-        return json_({ ok: true, data: { saved: true } });
+        return json_({ ok: true, data: saveUserLog_(body.userKey, body.log) });
+      case 'reviewUserLog':
+        return json_({ ok: true, data: reviewUserLog_(body.logId, body.verificationStatus, body.reviewNote, body.reviewedBy) });
       case 'deleteUserLog':
         deleteUserLog_(body.logId);
         return json_({ ok: true, data: { deleted: true } });
@@ -506,6 +518,115 @@ function updateUserTickets_(employeeId, totalTickets) {
   sheet.getRange(row._row, updatedCol).setValue(now_());
 }
 
+function normalizeVerificationStatus_(value) {
+  const status = String(value || '').trim().toUpperCase();
+  return ['AUTO_VERIFIED', 'NEEDS_REVIEW', 'APPROVED', 'REJECTED'].indexOf(status) >= 0
+    ? status
+    : 'NEEDS_REVIEW';
+}
+
+function isVerifiedStatus_(value) {
+  const status = normalizeVerificationStatus_(value);
+  return status === 'AUTO_VERIFIED' || status === 'APPROVED';
+}
+
+function determineInitialVerificationStatus_(steps, ocrSteps, ocrConfidence) {
+  const entered = number_(steps, 0);
+  const detected = number_(ocrSteps, 0);
+  const confidence = number_(ocrConfidence, 0);
+  return detected > 0 && detected === entered && confidence >= CONFIG.OCR_AUTO_VERIFY_MIN_CONFIDENCE
+    ? 'AUTO_VERIFIED'
+    : 'NEEDS_REVIEW';
+}
+
+function safeFileName_(value) {
+  return String(value || 'evidence.jpg')
+    .replace(/[\\/:*?"<>|#%{}~&]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 120);
+}
+
+function getOrCreateChildFolder_(parentFolder, folderName) {
+  const iterator = parentFolder.getFoldersByName(folderName);
+  return iterator.hasNext() ? iterator.next() : parentFolder.createFolder(folderName);
+}
+
+function uploadEvidence_(employeeId, log) {
+  const rawData = String(log.imageData || '');
+  const match = rawData.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new Error('ไม่พบข้อมูลรูปหลักฐานหรือรูปอยู่ในรูปแบบที่ไม่ถูกต้อง');
+
+  const monthNumber = number_(log.week, 1);
+  const weekNumber = number_(log.weekOfMonth, 1);
+  const monthFolderName = 'Month_' + String(monthNumber).padStart(2, '0');
+  const weekFolderName = 'Week_' + String(weekNumber).padStart(2, '0');
+  const root = DriveApp.getFolderById(CONFIG.EVIDENCE_ROOT_FOLDER_ID);
+  const monthFolder = getOrCreateChildFolder_(root, monthFolderName);
+  const weekFolder = getOrCreateChildFolder_(monthFolder, weekFolderName);
+  const bytes = Utilities.base64Decode(match[2]);
+  const mimeType = String(log.imageMimeType || match[1] || 'image/jpeg');
+  const timestamp = Utilities.formatDate(new Date(), CONFIG.TIMEZONE, 'yyyyMMdd_HHmmss');
+  const fileName = safeFileName_(employeeId + '_' + monthFolderName + '_' + weekFolderName + '_' + timestamp + '_' + (log.imageName || 'evidence.jpg'));
+  const blob = Utilities.newBlob(bytes, mimeType, fileName);
+  const file = weekFolder.createFile(blob);
+  file.setDescription('Thairath Step Up evidence | Employee ' + employeeId + ' | Month ' + monthNumber + ' | Week ' + weekNumber);
+
+  return {
+    imageName: fileName,
+    imageFileId: file.getId(),
+    imageUrl: file.getUrl()
+  };
+}
+
+function logRowToObject_(r) {
+  return {
+    id: String(r.id || ''),
+    userEmail: String(r.userEmail || '').toLowerCase(),
+    employeeId: normalizeId_(r.employeeId),
+    date: String(r.date || ''),
+    steps: number_(r.steps, 0),
+    week: number_(r.week, 1),
+    weekOfMonth: r.weekOfMonth ? number_(r.weekOfMonth, undefined) : undefined,
+    imageName: String(r.imageName || ''),
+    imageFileId: String(r.imageFileId || ''),
+    imageUrl: String(r.imageUrl || ''),
+    imagePreview: '',
+    ocrText: String(r.ocrText || ''),
+    ocrSteps: r.ocrSteps ? number_(r.ocrSteps, undefined) : undefined,
+    ocrConfidence: number_(r.ocrConfidence, 0),
+    verificationStatus: normalizeVerificationStatus_(r.verificationStatus),
+    reviewNote: String(r.reviewNote || ''),
+    reviewedBy: String(r.reviewedBy || ''),
+    reviewedAt: String(r.reviewedAt || ''),
+    submittedAt: String(r.submittedAt || '')
+  };
+}
+
+function recalculateTicketsForEmployee_(employeeId) {
+  const cleanId = normalizeId_(employeeId);
+  if (!cleanId) return 0;
+  const qualifyingCount = fetchAllStepLogs_().filter(log =>
+    normalizeId_(log.employeeId) === cleanId &&
+    isVerifiedStatus_(log.verificationStatus) &&
+    number_(log.steps, 0) >= CONFIG.WEEKLY_TARGET
+  ).length;
+
+  const row = getEmployeeByIdOrEmail_(cleanId);
+  if (row) {
+    const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
+    const ticketColumn = EMPLOYEE_HEADERS.indexOf('totalTickets') + 1;
+    const updatedColumn = EMPLOYEE_HEADERS.indexOf('updatedAt') + 1;
+    sheet.getRange(row._row, ticketColumn).setValue(qualifyingCount);
+    sheet.getRange(row._row, updatedColumn).setValue(now_());
+  }
+  return qualifyingCount;
+}
+
+function recalculateAllVerifiedTickets() {
+  setup_();
+  fetchAllUsers_().forEach(user => recalculateTicketsForEmployee_(user.employeeId));
+}
+
 function saveUserLog_(userKey, log) {
   if (!log) throw new Error('Missing log payload');
   const user = getEmployeeByIdOrEmail_(userKey);
@@ -515,21 +636,26 @@ function saveUserLog_(userKey, log) {
   const logId = String(log.id || Utilities.getUuid()).trim();
   const existing = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === logId);
   const monthNumber = number_(log.week, 1);
-  const weekOfMonth = log.weekOfMonth ? number_(log.weekOfMonth, '') : '';
+  const weekOfMonth = number_(log.weekOfMonth, 0);
   const employeeId = normalizeId_(user.employeeId);
+  const enteredSteps = number_(log.steps, 0);
+  if (enteredSteps <= 0) throw new Error('จำนวนก้าวต้องมากกว่า 0');
+  if (!weekOfMonth) throw new Error('กรุณาระบุสัปดาห์ของเดือน');
 
-  if (weekOfMonth) {
-    const duplicate = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r =>
-      String(r.id) !== logId &&
-      normalizeText_(r.employeeId) === normalizeText_(employeeId) &&
-      Number(r.week) === Number(monthNumber) &&
-      Number(r.weekOfMonth) === Number(weekOfMonth)
-    );
-    if (duplicate) {
-      throw new Error('พนักงานรายนี้ส่งข้อมูลของเดือนและสัปดาห์นี้แล้ว กรุณาลบรายการเดิมก่อนบันทึกใหม่');
-    }
+  const duplicate = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r =>
+    String(r.id) !== logId &&
+    normalizeText_(r.employeeId) === normalizeText_(employeeId) &&
+    Number(r.week) === Number(monthNumber) &&
+    Number(r.weekOfMonth) === Number(weekOfMonth)
+  );
+  if (duplicate) {
+    throw new Error('พนักงานรายนี้ส่งข้อมูลของเดือนและสัปดาห์นี้แล้ว กรุณาลบรายการเดิมก่อนบันทึกใหม่');
   }
 
+  const evidence = existing && existing.imageFileId
+    ? { imageName: existing.imageName, imageFileId: existing.imageFileId, imageUrl: existing.imageUrl }
+    : uploadEvidence_(employeeId, log);
+  const verificationStatus = determineInitialVerificationStatus_(enteredSteps, log.ocrSteps, log.ocrConfidence);
   const now = now_();
   const submittedAt = log.submittedAt || now;
   const rowValues = [
@@ -537,13 +663,22 @@ function saveUserLog_(userKey, log) {
     String(user.email || (user.employeeId + '@thairathgroup.com')).toLowerCase(),
     employeeId,
     log.date || '',
-    number_(log.steps, 0),
+    enteredSteps,
     monthNumber,
     weekOfMonth,
-    log.imageName || '',
+    evidence.imageName,
     submittedAt,
     existing ? existing.createdAt : now,
-    now
+    now,
+    evidence.imageFileId,
+    evidence.imageUrl,
+    String(log.ocrText || '').slice(0, 45000),
+    log.ocrSteps ? number_(log.ocrSteps, '') : '',
+    number_(log.ocrConfidence, 0),
+    verificationStatus,
+    '',
+    verificationStatus === 'AUTO_VERIFIED' ? 'Tesseract.js OCR' : '',
+    verificationStatus === 'AUTO_VERIFIED' ? now : ''
   ];
 
   if (existing) {
@@ -553,21 +688,33 @@ function saveUserLog_(userKey, log) {
   }
 
   updateEmployeeTimestamp_(employeeId, 'lastSubmitAt', submittedAt);
+  recalculateTicketsForEmployee_(employeeId);
+  return logRowToObject_(findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === logId));
+}
+
+function reviewUserLog_(logId, verificationStatus, reviewNote, reviewedBy) {
+  const nextStatus = normalizeVerificationStatus_(verificationStatus);
+  if (nextStatus !== 'APPROVED' && nextStatus !== 'REJECTED') {
+    throw new Error('Admin สามารถเลือกได้เฉพาะ APPROVED หรือ REJECTED');
+  }
+
+  const sheet = ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
+  const row = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === String(logId));
+  if (!row) throw new Error('ไม่พบรายการหลักฐานที่ต้องการตรวจ');
+
+  const now = now_();
+  sheet.getRange(row._row, LOG_HEADERS.indexOf('verificationStatus') + 1).setValue(nextStatus);
+  sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewNote') + 1).setValue(String(reviewNote || '').slice(0, 500));
+  sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewedBy') + 1).setValue(String(reviewedBy || 'Admin'));
+  sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewedAt') + 1).setValue(now);
+  sheet.getRange(row._row, LOG_HEADERS.indexOf('updatedAt') + 1).setValue(now);
+
+  recalculateTicketsForEmployee_(row.employeeId);
+  return logRowToObject_(findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === String(logId)));
 }
 
 function fetchAllStepLogs_() {
-  return readObjects_(CONFIG.LOG_SHEET, LOG_HEADERS).map(r => ({
-    id: String(r.id || ''),
-    userEmail: String(r.userEmail || '').toLowerCase(),
-    employeeId: normalizeId_(r.employeeId),
-    date: String(r.date || ''),
-    steps: number_(r.steps, 0),
-    week: number_(r.week, 1),
-    weekOfMonth: r.weekOfMonth ? number_(r.weekOfMonth, undefined) : undefined,
-    imageName: String(r.imageName || ''),
-    imagePreview: '',
-    submittedAt: String(r.submittedAt || '')
-  }));
+  return readObjects_(CONFIG.LOG_SHEET, LOG_HEADERS).map(logRowToObject_);
 }
 
 function fetchUserLogs_(userKey) {
@@ -576,9 +723,9 @@ function fetchUserLogs_(userKey) {
   const employeeId = user ? normalizeText_(user.employeeId) : key;
   const email = user ? normalizeText_(user.email || user.employeeId + '@thairathgroup.com') : key;
 
-  return fetchAllStepLogs_().filter(log => {
-    return normalizeText_(log.employeeId) === employeeId || normalizeText_(log.userEmail) === email;
-  });
+  return fetchAllStepLogs_().filter(log =>
+    normalizeText_(log.employeeId) === employeeId || normalizeText_(log.userEmail) === email
+  );
 }
 
 function deleteUserLog_(logId) {
@@ -586,39 +733,52 @@ function deleteUserLog_(logId) {
   const row = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === String(logId));
   if (!row) return;
   const employeeId = normalizeId_(row.employeeId);
+  const imageFileId = String(row.imageFileId || '').trim();
   sheet.deleteRow(row._row);
-  if (employeeId) recalculateLastSubmitAt_(employeeId);
+
+  if (imageFileId) {
+    try {
+      DriveApp.getFileById(imageFileId).setTrashed(true);
+    } catch (err) {
+      console.warn('Could not move evidence file to trash: ' + err);
+    }
+  }
+
+  if (employeeId) {
+    recalculateLastSubmitAt_(employeeId);
+    recalculateTicketsForEmployee_(employeeId);
+  }
 }
 
 function calculateLeaderboard_(currentWeek) {
   const users = fetchAllUsers_();
-  const logs = fetchAllStepLogs_().filter(l => Number(l.week) === Number(currentWeek));
+  const logs = fetchAllStepLogs_().filter(log =>
+    Number(log.week) === Number(currentWeek) && isVerifiedStatus_(log.verificationStatus)
+  );
   const userMap = {};
 
-  users.forEach(u => {
-    userMap[normalizeText_(u.employeeId)] = u;
-    userMap[normalizeText_(u.email)] = u;
+  users.forEach(user => {
+    userMap[normalizeText_(user.employeeId)] = user;
+    userMap[normalizeText_(user.email)] = user;
   });
 
   const departmentCatalog = getDepartmentCatalog_(users);
 
   return departmentCatalog.map(dept => {
-    const deptUsers = users.filter(u => sameDepartment_(u.departmentId, dept.id));
+    const deptUsers = users.filter(user => sameDepartment_(user.departmentId, dept.id));
     const deptUserCount = deptUsers.length || 1;
-    const deptLogs = logs.filter(l => {
-      const user = userMap[normalizeText_(l.employeeId)] || userMap[normalizeText_(l.userEmail)];
+    const deptLogs = logs.filter(log => {
+      const user = userMap[normalizeText_(log.employeeId)] || userMap[normalizeText_(log.userEmail)];
       return user && sameDepartment_(user.departmentId, dept.id);
     });
 
-    const totalSteps = deptLogs.reduce((sum, l) => sum + number_(l.steps, 0), 0);
+    const totalSteps = deptLogs.reduce((sum, log) => sum + number_(log.steps, 0), 0);
     const uniqueParticipants = {};
-    deptLogs.forEach(l => uniqueParticipants[normalizeText_(l.employeeId || l.userEmail)] = true);
+    deptLogs.forEach(log => uniqueParticipants[normalizeText_(log.employeeId || log.userEmail)] = true);
     const participantCount = Object.keys(uniqueParticipants).length;
-
     const averageStepsPerPerson = totalSteps > 0
       ? Math.round(totalSteps / Math.max(1, participantCount))
       : 0;
-
     const participationRate = deptUsers.length > 0
       ? Math.round((participantCount / deptUserCount) * 100)
       : 0;

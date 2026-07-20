@@ -100,12 +100,6 @@ export function getCampaignWeeksThroughMonth(monthNumber: number): Array<{ month
     .flatMap((month) => month.weeks.map((week) => ({ monthNumber: month.number, week })));
 }
 
-export function countDaysInclusive(startDate: string, endDate: string): number {
-  const start = new Date(`${startDate}T00:00:00+07:00`);
-  const end = new Date(`${endDate}T00:00:00+07:00`);
-  return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
-}
-
 export function getOpenedCampaignWeeks(asOf = new Date()): Array<{ monthNumber: number; week: CampaignWeek }> {
   const asOfTime = asOf.getTime();
   return CAMPAIGN_MONTHS.flatMap((month) =>

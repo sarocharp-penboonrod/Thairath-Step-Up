@@ -13,11 +13,10 @@ import {
   Ticket,
   TrendingUp
 } from 'lucide-react';
-import { ActiveUser, StepLog, WeekConfig } from '../types';
+import { ActiveUser, StepLog, WeekConfig, isVerifiedStatus } from '../types';
 import {
   CAMPAIGN_MONTHS,
   CAMPAIGN_WEEKLY_TARGET,
-  countDaysInclusive,
   getCampaignMonth,
   getCampaignWeek,
   getCampaignWeeksThroughMonth,
@@ -78,9 +77,11 @@ export default function DashboardView({
 }: DashboardViewProps) {
   const selectedMonth = getCampaignMonth(currentWeek);
   const weeklyTarget = CAMPAIGN_WEEKLY_TARGET;
-  const allPeriods = buildPeriodSummaries(stepLogs);
+  const verifiedLogs = stepLogs.filter((log) => isVerifiedStatus(log.verificationStatus));
+  const allPeriods = buildPeriodSummaries(verifiedLogs);
   const selectedPeriods = allPeriods.filter((period) => period.monthNumber === currentWeek);
   const selectedMonthLogs = stepLogs.filter((log) => Number(log.week) === currentWeek);
+  const pendingMonthLogs = selectedMonthLogs.filter((log) => log.verificationStatus === 'NEEDS_REVIEW').length;
 
   const monthlySteps = selectedPeriods.reduce((sum, period) => sum + period.steps, 0);
   const monthlyTarget = selectedMonth.weeks.length * weeklyTarget;
@@ -101,49 +102,22 @@ export default function DashboardView({
   const overallProgress = targetToDate > 0 ? Math.round((totalSteps / targetToDate) * 100) : 0;
   const completedWeeks = cumulativePeriods.filter((period) => period.steps >= weeklyTarget).length;
 
-  const coveredDays = selectedPeriods.reduce((sum, period) => {
-    const campaignWeek = getCampaignWeek(period.monthNumber, period.weekNumber);
-    return sum + (campaignWeek ? countDaysInclusive(campaignWeek.startDate, campaignWeek.endDate) : 7);
-  }, 0);
-  const estimatedDailyAverage = coveredDays > 0 ? Math.round(monthlySteps / coveredDays) : 0;
+  const averageVerifiedWeeklySteps = selectedPeriods.length > 0
+    ? Math.round(monthlySteps / selectedPeriods.length)
+    : 0;
   const peakPeriod = [...selectedPeriods].sort((a, b) => b.steps - a.steps)[0];
-  const userAge = Number(activeUser.age) || 30;
 
-  let ageGroupText = 'วัยทำงาน 30 - 45 ปี';
-  let minStandard = 7000;
-  let maxStandard = 9000;
+  const healthLevel = averageVerifiedWeeklySteps === 0
+    ? { text: 'รอข้อมูลที่ผ่านการตรวจ', className: 'text-slate-600 bg-slate-50 border-slate-200' }
+    : averageVerifiedWeeklySteps < weeklyTarget
+      ? { text: 'ค่าเฉลี่ยยังต่ำกว่าเป้าหมาย 7,000 ก้าว', className: 'text-amber-700 bg-amber-50 border-amber-100' }
+      : { text: 'ค่าเฉลี่ยถึงเป้าหมาย 7,000 ก้าว', className: 'text-[#00914E] bg-[#E8F5E9] border-emerald-100' };
 
-  if (userAge < 30) {
-    ageGroupText = 'อายุต่ำกว่า 30 ปี';
-    minStandard = 8000;
-    maxStandard = 10000;
-  } else if (userAge <= 45) {
-    ageGroupText = 'วัยทำงาน 30 - 45 ปี';
-  } else if (userAge <= 59) {
-    ageGroupText = 'ช่วงอายุ 46 - 59 ปี';
-    minStandard = 6000;
-    maxStandard = 8000;
-  } else {
-    ageGroupText = 'วัย 60 ปีขึ้นไป';
-    minStandard = 5000;
-    maxStandard = 7000;
-  }
-
-  const healthLevel = estimatedDailyAverage === 0
-    ? { text: 'รอข้อมูลการส่งผล', className: 'text-slate-600 bg-slate-50 border-slate-200' }
-    : estimatedDailyAverage < minStandard
-      ? { text: 'ลองเพิ่มการเคลื่อนไหวระหว่างวัน', className: 'text-amber-700 bg-amber-50 border-amber-100' }
-      : estimatedDailyAverage <= maxStandard
-        ? { text: 'อยู่ในช่วงเป้าหมายที่เหมาะสม', className: 'text-[#00914E] bg-[#E8F5E9] border-emerald-100' }
-        : { text: 'ทำได้สูงกว่าเป้าหมายของช่วงวัย', className: 'text-indigo-700 bg-indigo-50 border-indigo-100' };
-
-  const recommendation = estimatedDailyAverage === 0
-    ? 'เริ่มส่งยอดก้าวประจำสัปดาห์ เพื่อให้ระบบคำนวณค่าเฉลี่ยและแสดงแนวโน้มของคุณได้แม่นยำขึ้น'
-    : estimatedDailyAverage < minStandard
-      ? 'ลองแบ่งเวลาลุกเดินสั้น ๆ ทุกชั่วโมง ใช้บันไดเมื่อเหมาะสม หรือเดินเพิ่มหลังมื้ออาหาร เพื่อเพิ่มกิจกรรมอย่างค่อยเป็นค่อยไป'
-      : estimatedDailyAverage <= maxStandard
-        ? 'รักษาความสม่ำเสมอของการเดิน และสลับวันพักหรือกิจกรรมเบา ๆ เพื่อให้ทำได้ต่อเนื่องตลอดโครงการ'
-        : 'ยอดก้าวอยู่ในระดับสูง ควรฟังสัญญาณร่างกาย พักให้เพียงพอ และไม่เพิ่มความหนักรวดเร็วจนเกินไป';
+  const recommendation = averageVerifiedWeeklySteps === 0
+    ? 'ส่งยอดพร้อมหลักฐานและรอการตรวจ ระบบจะนำเฉพาะ AUTO_VERIFIED หรือ APPROVED มาคำนวณ'
+    : averageVerifiedWeeklySteps < weeklyTarget
+      ? `เพิ่มอีกเฉลี่ย ${(weeklyTarget - averageVerifiedWeeklySteps).toLocaleString()} ก้าวต่อสัปดาห์เพื่อถึงเป้าหมาย โดยระบบเทียบยอดรายสัปดาห์กับ 7,000 โดยตรง`
+      : 'รักษาความสม่ำเสมอในแต่ละสัปดาห์ โดยคูปองจะเกิดขึ้นเฉพาะรายการที่ผ่านตรวจและมียอดอย่างน้อย 7,000 ก้าว';
 
   const journeyCards = [
     {
@@ -290,8 +264,8 @@ export default function DashboardView({
                 <p className="text-base font-black text-black mt-1">{completedMonthWeeks} สัปดาห์</p>
               </div>
               <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 col-span-2 sm:col-span-1">
-                <p className="text-[10px] font-bold text-slate-400">เฉลี่ยโดยประมาณ</p>
-                <p className="text-base font-black text-black mt-1">{estimatedDailyAverage.toLocaleString()} ก้าว/วัน</p>
+                <p className="text-[10px] font-bold text-slate-400">เฉลี่ยรายการที่ผ่านตรวจ</p>
+                <p className="text-base font-black text-black mt-1">{averageVerifiedWeeklySteps.toLocaleString()} ก้าว/สัปดาห์</p>
               </div>
             </div>
           </div>
@@ -325,7 +299,7 @@ export default function DashboardView({
               <div className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-[#FFCC00]" /><span className="text-xs font-bold text-emerald-100">เดือนนี้ทำถึงเป้า</span></div>
               <span className="font-black text-lg text-[#FFCC00]">{completedMonthWeeks} สัปดาห์</span>
             </div>
-            <p className="text-[10px] text-emerald-100/80 leading-relaxed">จำนวนตั๋วจริงอ้างอิงจากฐานข้อมูลพนักงาน และอาจรวมตั๋วโบนัสที่ Admin ปรับให้เพิ่มเติม</p>
+            <p className="text-[10px] text-emerald-100/80 leading-relaxed">คูปองนับจากรายการ AUTO_VERIFIED หรือ APPROVED ที่มียอดอย่างน้อย 7,000 ก้าวเท่านั้น</p>
           </div>
         </section>
       </div>
@@ -335,7 +309,7 @@ export default function DashboardView({
           <div className="flex justify-between items-center mb-4 gap-3">
             <div className="flex items-center gap-2.5">
               <div className="w-2.5 h-2.5 rounded-full bg-[#008148]" />
-              <h3 className="font-extrabold text-black text-base">รายการส่งผลเดือนนี้ ({selectedMonthLogs.length} รายการ)</h3>
+              <h3 className="font-extrabold text-black text-base">รายการส่งผลเดือนนี้ ({selectedMonthLogs.length} รายการ){pendingMonthLogs > 0 ? ` · รอตรวจ ${pendingMonthLogs}` : ''}</h3>
             </div>
             <span className="text-xs font-bold text-[#008148] group-hover:underline shrink-0">ดูทั้งหมด →</span>
           </div>
@@ -353,6 +327,7 @@ export default function DashboardView({
                     <th className="py-2.5 text-left">รอบที่ส่ง</th>
                     <th className="py-2.5 text-left">ช่วงวันที่</th>
                     <th className="py-2.5 text-right">จำนวนก้าว</th>
+                    <th className="py-2.5 text-center">สถานะ</th>
                     <th className="py-2.5 text-right">เวลาที่ส่ง</th>
                   </tr>
                 </thead>
@@ -364,6 +339,7 @@ export default function DashboardView({
                         <td className="py-3 font-extrabold text-[#008148]">{week?.label || `รายการเดิม`}</td>
                         <td className="py-3 font-semibold">{week?.range || new Date(log.date).toLocaleDateString('th-TH')}</td>
                         <td className="py-3 text-right font-black text-black tabular-nums">{log.steps.toLocaleString()}</td>
+                        <td className="py-3 text-center"><span className={`px-2 py-1 rounded-full text-[9px] font-extrabold ${isVerifiedStatus(log.verificationStatus) ? 'bg-emerald-50 text-emerald-700' : log.verificationStatus === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>{isVerifiedStatus(log.verificationStatus) ? 'ผ่านตรวจ' : log.verificationStatus === 'REJECTED' ? 'ไม่ผ่าน' : 'รอตรวจ'}</span></td>
                         <td className="py-3 text-right text-xs text-gray-400">{new Date(log.submittedAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
                       </tr>
                     );
@@ -383,16 +359,16 @@ export default function DashboardView({
 
             <div className="space-y-3">
               <div className="flex justify-between items-center p-3 rounded-xl bg-[#F2F4F7] gap-3">
-                <span className="text-xs font-bold text-[#475467]">ค่าเฉลี่ยโดยประมาณ</span>
-                <span className="text-sm font-extrabold text-black text-right">{estimatedDailyAverage.toLocaleString()} ก้าว/วัน</span>
+                <span className="text-xs font-bold text-[#475467]">เฉลี่ยต่อสัปดาห์ที่ผ่านตรวจ</span>
+                <span className="text-sm font-extrabold text-black text-right">{averageVerifiedWeeklySteps.toLocaleString()} ก้าว</span>
               </div>
               <div className="flex justify-between items-center p-3 rounded-xl bg-[#F2F4F7] gap-3">
-                <span className="text-xs font-bold text-[#475467]">กลุ่มอายุ</span>
-                <span className="text-xs font-extrabold text-black text-right">{userAge} ปี · {ageGroupText}</span>
+                <span className="text-xs font-bold text-[#475467]">รายการรอตรวจเดือนนี้</span>
+                <span className="text-xs font-extrabold text-amber-700 text-right">{pendingMonthLogs} รายการ</span>
               </div>
               <div className="flex justify-between items-center p-3 rounded-xl bg-[#F2F4F7] gap-3">
-                <span className="text-xs font-bold text-[#475467]">ช่วงเป้าหมายอ้างอิง</span>
-                <span className="text-xs font-extrabold text-black text-right">{minStandard.toLocaleString()}–{maxStandard.toLocaleString()} ก้าว/วัน</span>
+                <span className="text-xs font-bold text-[#475467]">เป้าหมายที่ใช้คำนวณ</span>
+                <span className="text-xs font-extrabold text-black text-right">7,000 ก้าว/สัปดาห์</span>
               </div>
               <div className={`p-3 rounded-xl text-center border font-bold text-xs ${healthLevel.className}`}>
                 {healthLevel.text}
@@ -411,7 +387,7 @@ export default function DashboardView({
               )}
             </div>
           </div>
-          <p className="pt-4 border-t border-gray-100 mt-4 text-[10px] text-gray-400 font-medium text-center">ข้อมูลนี้เป็นคำแนะนำทั่วไป ไม่ใช่คำแนะนำทางการแพทย์</p>
+          <p className="pt-4 border-t border-gray-100 mt-4 text-[10px] text-gray-400 font-medium text-center">ระบบคำนวณจากข้อมูลที่ผ่านตรวจเท่านั้น และไม่หารจำนวนวัน</p>
         </section>
       </div>
     </div>

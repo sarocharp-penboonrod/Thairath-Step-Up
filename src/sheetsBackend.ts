@@ -1,4 +1,4 @@
-import { ActiveUser, StepLog, DepartmentInfo } from './types';
+import { ActiveUser, StepLog, DepartmentInfo, NewStepLogInput, VerificationStatus } from './types';
 import { INITIAL_DEPARTMENTS } from './mockData';
 import { CAMPAIGN_WEEKLY_TARGET } from './campaignConfig';
 
@@ -18,9 +18,7 @@ const SHEETS_API_URL = import.meta.env.VITE_SHEETS_API_URL || '/api/sheets';
 async function sheetsRequest<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(SHEETS_API_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload })
   });
 
@@ -55,7 +53,6 @@ function withSafeDepartment(profile: ActiveUser): ActiveUser {
   };
 }
 
-// Google Sheets setup is handled by the Apps Script endpoint.
 export async function seedInitialDataIfNecessary() {
   try {
     await sheetsRequest<{ ready: boolean }>('setup');
@@ -63,7 +60,6 @@ export async function seedInitialDataIfNecessary() {
     console.warn('Google Sheets setup check skipped:', err);
   }
 }
-
 
 export async function verifyAdminLogin(username: string, password: string): Promise<boolean> {
   const result = await sheetsRequest<{ authenticated: boolean }>('verifyAdmin', {
@@ -79,10 +75,7 @@ export async function verifyEmployeeLogin(employeeId: string, password: string):
     password: password.trim()
   });
 
-  return {
-    ...result,
-    profile: withSafeDepartment(result.profile)
-  };
+  return { ...result, profile: withSafeDepartment(result.profile) };
 }
 
 export async function getUserProfile(idOrEmail: string): Promise<ActiveUser | null> {
@@ -117,37 +110,38 @@ export async function fetchUserLogs(userKey: string): Promise<StepLog[]> {
   }
 }
 
-export async function saveUserLog(userKey: string, log: StepLog) {
-  const payload: StepLog = {
-    ...log,
-    // Google Sheets has a 50,000-character cell limit, so we do not persist the base64 preview.
-    imagePreview: undefined
-  };
-
-  await sheetsRequest<{ saved: boolean }>('saveUserLog', {
+export async function saveUserLog(userKey: string, input: NewStepLogInput): Promise<StepLog> {
+  return sheetsRequest<StepLog>('saveUserLog', {
     userKey: normalizeUserKey(userKey),
-    log: payload
+    log: {
+      ...input,
+      id: `log-${Date.now()}`,
+      submittedAt: new Date().toISOString()
+    }
+  });
+}
+
+export async function reviewUserLog(
+  logId: string,
+  verificationStatus: Extract<VerificationStatus, 'APPROVED' | 'REJECTED'>,
+  reviewNote = '',
+  reviewedBy = 'Admin'
+): Promise<StepLog> {
+  return sheetsRequest<StepLog>('reviewUserLog', {
+    logId,
+    verificationStatus,
+    reviewNote,
+    reviewedBy
   });
 }
 
 export async function deleteUserLog(logId: string) {
-  await sheetsRequest<{ deleted: boolean }>('deleteUserLog', {
-    logId
-  });
-}
-
-export async function updateUserTickets(employeeId: string, totalTickets: number) {
-  await sheetsRequest<{ saved: boolean }>('updateUserTickets', {
-    employeeId: employeeId.trim(),
-    totalTickets: Math.max(0, Number(totalTickets) || 0)
-  });
+  await sheetsRequest<{ deleted: boolean }>('deleteUserLog', { logId });
 }
 
 export async function calculateSheetsLeaderboard(currentWeek: number): Promise<DepartmentInfo[]> {
   try {
-    const leaderboard = await sheetsRequest<DepartmentInfo[]>('calculateLeaderboard', {
-      currentWeek
-    });
+    const leaderboard = await sheetsRequest<DepartmentInfo[]>('calculateLeaderboard', { currentWeek });
     return leaderboard && leaderboard.length > 0 ? leaderboard : INITIAL_DEPARTMENTS;
   } catch (err) {
     console.error('Error fetching dynamic leaderboard data from Google Sheets:', err);
@@ -155,22 +149,21 @@ export async function calculateSheetsLeaderboard(currentWeek: number): Promise<D
   }
 }
 
-export async function fetchAllUsers(): Promise<any[]> {
+export async function fetchAllUsers(): Promise<unknown[]> {
   try {
-    return await sheetsRequest<any[]>('fetchAllUsers');
+    return await sheetsRequest<unknown[]>('fetchAllUsers');
   } catch (err) {
     console.error('Error fetching all users for admin from Google Sheets:', err);
     return [];
   }
 }
 
-export async function fetchAllStepLogs(): Promise<any[]> {
+export async function fetchAllStepLogs(): Promise<unknown[]> {
   try {
-    const logs = await sheetsRequest<any[]>('fetchAllStepLogs');
+    const logs = await sheetsRequest<StepLog[]>('fetchAllStepLogs');
     return logs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
   } catch (err) {
     console.error('Error fetching all step logs for admin from Google Sheets:', err);
     return [];
   }
 }
-

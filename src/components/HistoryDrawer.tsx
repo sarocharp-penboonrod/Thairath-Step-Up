@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { X, History, Trash2, Calendar, Award, ExternalLink, Sliders } from 'lucide-react';
-import { StepLog, WeekConfig } from '../types';
+import { StepLog, WeekConfig, isVerifiedStatus } from '../types';
 
 interface HistoryDrawerProps {
   isOpen: boolean;
@@ -55,7 +55,7 @@ export default function HistoryDrawer({
           ) : (
             <div className="space-y-4">
               <p className="text-xs text-[#344054] font-semibold">
-                * รายการประวัติทั้งหมดของคุณ ({sortedLogs.length} บันทึก) คุณสามารถลบประวัติเพื่อทดสอบการลดระดับคะแนนได้
+                * รายการทั้งหมดรวมสถานะรอตรวจและไม่ผ่าน Dashboard/Leaderboard/คูปองจะใช้เฉพาะรายการที่ผ่านตรวจ
               </p>
               
               <div className="divide-y divide-gray-100 border border-[#edf2f7] rounded-xl overflow-hidden bg-white">
@@ -77,9 +77,9 @@ export default function HistoryDrawer({
                       
                       {/* Left: Metadata */}
                       <div className="flex items-start gap-3">
-                        {log.imagePreview ? (
+                        {(log.imageUrl || log.imagePreview) ? (
                           <img 
-                            src={log.imagePreview} 
+                            src={log.imageFileId ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(log.imageFileId)}&sz=w300` : (log.imageUrl || log.imagePreview)} 
                             alt="Screenshot Proof" 
                             className="w-12 h-12 rounded-lg object-cover border border-gray-200/50 flex-shrink-0"
                             referrerPolicy="no-referrer"
@@ -100,6 +100,10 @@ export default function HistoryDrawer({
                             <span className="text-[10px] text-[#344054] font-medium max-w-[130px] truncate" title={log.imageName}>
                               📸 {log.imageName}
                             </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isVerifiedStatus(log.verificationStatus) ? 'bg-emerald-50 text-emerald-700' : log.verificationStatus === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                              {isVerifiedStatus(log.verificationStatus) ? 'ผ่านตรวจ' : log.verificationStatus === 'REJECTED' ? 'ไม่ผ่าน' : 'รอตรวจ'}
+                            </span>
+                            {log.imageUrl && <a href={log.imageUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="text-[10px] font-bold text-blue-600 hover:underline">เปิดหลักฐาน</a>}
                           </div>
                         </div>
                       </div>

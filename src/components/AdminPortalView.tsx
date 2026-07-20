@@ -2,31 +2,32 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Building,
-  CalendarDays,
   CheckCircle2,
   Download,
   ExternalLink,
+  Eye,
+  FileCheck2,
   FileSpreadsheet,
   Footprints,
   RefreshCw,
   Search,
   ShieldAlert,
-  Ticket,
   Trash2,
   Trophy,
   UserPlus,
   Users,
-  UserX
+  UserX,
+  XCircle
 } from 'lucide-react';
 import {
   createUserOrUpdateProfile,
   deleteUserLog,
   fetchAllStepLogs,
   fetchAllUsers,
-  updateUserTickets
+  reviewUserLog
 } from '../sheetsBackend';
-import { ActiveUser, DepartmentInfo, StepLog } from '../types';
-import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET, getDefaultCampaignMonth, getCampaignMonth } from '../campaignConfig';
+import { ActiveUser, DepartmentInfo, StepLog, VerificationStatus, isVerifiedStatus } from '../types';
+import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET, getCampaignMonth, getDefaultCampaignMonth } from '../campaignConfig';
 
 interface AdminPortalViewProps {
   departments: DepartmentInfo[];
@@ -45,7 +46,16 @@ interface AdminLog extends StepLog {
   employeeId?: string;
 }
 
+type AdminTab = 'employees' | 'evidence' | 'leaderboard';
+
 const DATABASE_URL = 'https://docs.google.com/spreadsheets/d/1YgxxKpP74EkzfzAJn2wnTXamrYJ9-aBZsKwcBo7v3Dk/edit';
+
+const STATUS_META: Record<VerificationStatus, { label: string; className: string }> = {
+  AUTO_VERIFIED: { label: 'Auto Verified', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  NEEDS_REVIEW: { label: 'Needs Review', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  APPROVED: { label: 'Approved', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  REJECTED: { label: 'Rejected', className: 'bg-rose-50 text-rose-700 border-rose-200' }
+};
 
 function normalizeText(value?: string): string {
   return String(value || '').trim().toLowerCase();
@@ -63,22 +73,33 @@ function getDisplayName(user?: Pick<AdminUser, 'name' | 'surname' | 'Surename'> 
   return [name, surname].filter(Boolean).join(' ');
 }
 
-function csvCell(value: unknown): string {
-  const text = String(value ?? '').replace(/"/g, '""');
-  return `"${text}"`;
+function formatDateTime(value?: string, emptyText = 'ยังไม่มีข้อมูล') {
+  if (!value) return emptyText;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('th-TH', {
+    year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
+  });
 }
 
-function downloadCsv(filename: string, rows: string[][]) {
+function csvCell(value: unknown): string {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, rows: unknown[][]) {
   const content = `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\n')}`;
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8;' }));
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
   document.body.appendChild(link);
   link.click();
-  document.body.removeChild(link);
+  link.remove();
   URL.revokeObjectURL(url);
+}
+
+function evidenceThumbnail(log: AdminLog): string {
+  return log.imageFileId ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(log.imageFileId)}&sz=w600` : '';
 }
 
 export default function AdminPortalView({ departments, onExit }: AdminPortalViewProps) {
@@ -86,27 +107,18 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
   const [logs, setLogs] = useState<AdminLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [activeSubTab, setActiveSubTab] = useState<'employees' | 'submissions' | 'leaderboard'>('employees');
-
-  const [reportMonthFilter, setReportMonthFilter] = useState(String(getDefaultCampaignMonth()));
-  const [reportWeekFilter, setReportWeekFilter] = useState('all');
-  const [userSearchText, setUserSearchText] = useState('');
-  const [userDeptFilter, setUserDeptFilter] = useState('all');
-  const [logSearchText, setLogSearchText] = useState('');
+  const [activeTab, setActiveTab] = useState<AdminTab>('evidence');
+  const [monthFilter, setMonthFilter] = useState(String(getDefaultCampaignMonth()));
+  const [weekFilter, setWeekFilter] = useState('all');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [searchText, setSearchText] = useState('');
+  const [verificationFilter, setVerificationFilter] = useState<'all' | VerificationStatus>('NEEDS_REVIEW');
+  const [reviewingId, setReviewingId] = useState('');
 
   const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [newEmpId, setNewEmpId] = useState('');
-  const [newEmpName, setNewEmpName] = useState('');
-  const [newEmpSurname, setNewEmpSurname] = useState('');
-  const [newEmpNickname, setNewEmpNickname] = useState('');
-  const [newEmpDept, setNewEmpDept] = useState(departments[0]?.id || 'ceo');
-  const [newEmpBirthDate, setNewEmpBirthDate] = useState('');
-  const [newEmpError, setNewEmpError] = useState('');
+  const [newEmployee, setNewEmployee] = useState({ id: '', name: '', surname: '', nickname: '', departmentId: departments[0]?.id || '', birthDate: '' });
+  const [newEmployeeError, setNewEmployeeError] = useState('');
   const [isSavingUser, setIsSavingUser] = useState(false);
-
-  const [adjustingUser, setAdjustingUser] = useState<AdminUser | null>(null);
-  const [ticketDelta, setTicketDelta] = useState(1);
-  const [isUpdatingTickets, setIsUpdatingTickets] = useState(false);
 
   const loadAdminData = async () => {
     setIsLoading(true);
@@ -116,525 +128,281 @@ export default function AdminPortalView({ departments, onExit }: AdminPortalView
       setUsers(allUsers as AdminUser[]);
       setLogs(allLogs as AdminLog[]);
     } catch (error: any) {
-      console.error('Error loading admin data:', error);
-      setLoadError(error?.message || 'ไม่สามารถโหลดข้อมูลจาก Google Sheets ได้');
+      setLoadError(error?.message || 'ไม่สามารถโหลดข้อมูล Admin ได้');
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadAdminData();
+    void loadAdminData();
   }, []);
 
-  const allDepartments = useMemo<DepartmentInfo[]>(() => {
-    const departmentMap = new Map<string, DepartmentInfo>();
-
-    departments.forEach((department) => {
-      if (department?.id) departmentMap.set(normalizeDeptKey(department.id), department);
-    });
-
+  const allDepartments = useMemo(() => {
+    const map = new Map<string, DepartmentInfo>();
+    departments.forEach((department) => map.set(normalizeDeptKey(department.id), department));
     users.forEach((user) => {
-      const rawDepartment = String(user.departmentId || user.departmentName || user.rawDepartmentId || '').trim();
-      if (!rawDepartment) return;
-      const key = normalizeDeptKey(rawDepartment);
-      const existing = Array.from(departmentMap.values()).find((department) =>
-        [department.id, department.nameTh, department.nameEn].some((value) => normalizeDeptKey(value) === key)
-      );
-      if (!existing) {
-        departmentMap.set(key, {
-          id: rawDepartment,
-          nameTh: user.departmentName || rawDepartment,
-          nameEn: user.departmentName || rawDepartment,
-          participationRate: 0,
-          averageStepsPerPerson: 0,
-          status: 'stable',
-          statusText: 'ข้อมูลจาก Google Sheets'
-        });
-      }
+      const raw = String(user.departmentId || user.departmentName || user.rawDepartmentId || '').trim();
+      if (!raw || map.has(normalizeDeptKey(raw))) return;
+      map.set(normalizeDeptKey(raw), {
+        id: raw,
+        nameTh: user.departmentName || raw,
+        nameEn: user.departmentName || raw,
+        participationRate: 0,
+        averageStepsPerPerson: 0,
+        status: 'stable',
+        statusText: 'ข้อมูลจาก Google Sheets'
+      });
     });
-
-    return Array.from(departmentMap.values()).sort((a, b) => a.nameTh.localeCompare(b.nameTh, 'th'));
+    return Array.from(map.values()).sort((a, b) => a.nameTh.localeCompare(b.nameTh, 'th'));
   }, [departments, users]);
-
-  useEffect(() => {
-    if (!newEmpDept && allDepartments[0]?.id) setNewEmpDept(allDepartments[0].id);
-  }, [allDepartments, newEmpDept]);
 
   const resolveDepartment = (departmentId?: string) => {
     const key = normalizeDeptKey(departmentId);
-    if (!key) return null;
     return allDepartments.find((department) =>
       [department.id, department.nameTh, department.nameEn].some((value) => normalizeDeptKey(value) === key)
-    ) || null;
+    );
   };
 
-  const isSameDepartment = (departmentId?: string, filterDepartmentId?: string) => {
-    if (!filterDepartmentId || filterDepartmentId === 'all') return true;
-    const userDepartment = resolveDepartment(departmentId);
-    const filterDepartment = resolveDepartment(filterDepartmentId);
-    return normalizeDeptKey(userDepartment?.id || departmentId) === normalizeDeptKey(filterDepartment?.id || filterDepartmentId);
-  };
+  const findUserForLog = (log: AdminLog) => users.find((user) =>
+    (log.employeeId && normalizeText(user.employeeId) === normalizeText(log.employeeId)) ||
+    (log.userEmail && normalizeText(user.email) === normalizeText(log.userEmail))
+  );
 
-  const findUserForLog = (log: AdminLog) => users.find((user) => {
-    const employeeMatches = log.employeeId && normalizeText(user.employeeId) === normalizeText(log.employeeId);
-    const emailMatches = log.userEmail && normalizeText(user.email) === normalizeText(log.userEmail);
-    return employeeMatches || emailMatches;
-  });
+  const periodLogs = useMemo(() => logs.filter((log) => {
+    const monthMatches = monthFilter === 'all' || Number(log.week) === Number(monthFilter);
+    const weekMatches = weekFilter === 'all' || Number(log.weekOfMonth) === Number(weekFilter);
+    return monthMatches && weekMatches;
+  }), [logs, monthFilter, weekFilter]);
 
-  const formatDateTime = (value?: string, emptyText = 'ยังไม่มีข้อมูล') => {
-    if (!value) return emptyText;
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString('th-TH', {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
-  };
-
-  const logsInSelectedPeriod = useMemo(() => logs.filter((log) => {
-    const matchesMonth = reportMonthFilter === 'all' || Number(log.week) === Number(reportMonthFilter);
-    const matchesWeek = reportWeekFilter === 'all' || Number(log.weekOfMonth) === Number(reportWeekFilter);
-    return matchesMonth && matchesWeek;
-  }), [logs, reportMonthFilter, reportWeekFilter]);
-
-  const latestSubmitByEmployee = useMemo(() => {
-    const result = new Map<string, string>();
-    logs.forEach((log) => {
-      const key = normalizeText(log.employeeId || log.userEmail);
-      const current = result.get(key);
-      if (!current || String(log.submittedAt || '') > current) result.set(key, String(log.submittedAt || ''));
-    });
-    return result;
-  }, [logs]);
-
+  const verifiedPeriodLogs = useMemo(() => periodLogs.filter((log) => isVerifiedStatus(log.verificationStatus)), [periodLogs]);
   const activeUsers = users.filter((user) => normalizeText(user.status || 'Active') === 'active');
-  const participantKeys = new Set(logsInSelectedPeriod.map((log) => normalizeText(log.employeeId || log.userEmail)).filter(Boolean));
-  const submittedEmployees = activeUsers.filter((user) =>
-    participantKeys.has(normalizeText(user.employeeId)) || participantKeys.has(normalizeText(user.email))
-  ).length;
-  const notSubmittedEmployees = Math.max(0, activeUsers.length - submittedEmployees);
-  const participationRate = activeUsers.length > 0 ? Math.round((submittedEmployees / activeUsers.length) * 100) : 0;
-  const scopedTotalSteps = logsInSelectedPeriod.reduce((sum, log) => sum + (Number(log.steps) || 0), 0);
 
-  const filteredUsers = users.filter((user) => {
-    const search = normalizeText(userSearchText);
-    const fullName = getDisplayName(user);
-    const matchesSearch = !search || [fullName, user.nickname, user.employeeId, user.email]
-      .some((value) => normalizeText(value).includes(search));
-    return matchesSearch && isSameDepartment(user.departmentId, userDeptFilter);
-  });
-
-  const filteredLogs = logsInSelectedPeriod.filter((log) => {
-    const search = normalizeText(logSearchText);
-    if (!search) return true;
+  const filteredEvidence = useMemo(() => periodLogs.filter((log) => {
+    if (verificationFilter !== 'all' && log.verificationStatus !== verificationFilter) return false;
     const user = findUserForLog(log);
-    return [
-      log.userEmail,
-      log.employeeId,
-      log.imageName,
-      user?.name,
-      user?.nickname,
-      user?.employeeId
-    ].some((value) => normalizeText(value).includes(search));
-  });
+    if (departmentFilter !== 'all' && normalizeDeptKey(resolveDepartment(user?.departmentId)?.id || user?.departmentId) !== normalizeDeptKey(departmentFilter)) return false;
+    const search = normalizeText(searchText);
+    if (!search) return true;
+    return [log.employeeId, log.userEmail, log.imageName, user?.name, user?.nickname]
+      .some((value) => normalizeText(value).includes(search));
+  }), [periodLogs, verificationFilter, departmentFilter, searchText, users, allDepartments]);
+
+  const filteredUsers = useMemo(() => users.filter((user) => {
+    const search = normalizeText(searchText);
+    const searchMatches = !search || [user.employeeId, user.email, user.name, user.nickname, getDisplayName(user)]
+      .some((value) => normalizeText(value).includes(search));
+    const departmentMatches = departmentFilter === 'all' || normalizeDeptKey(resolveDepartment(user.departmentId)?.id || user.departmentId) === normalizeDeptKey(departmentFilter);
+    return searchMatches && departmentMatches;
+  }), [users, searchText, departmentFilter, allDepartments]);
+
+  const participantKeys = new Set(verifiedPeriodLogs.map((log) => normalizeText(log.employeeId || log.userEmail)));
+  const submittedEmployees = activeUsers.filter((user) => participantKeys.has(normalizeText(user.employeeId)) || participantKeys.has(normalizeText(user.email))).length;
+  const participationRate = activeUsers.length ? Math.round((submittedEmployees / activeUsers.length) * 100) : 0;
+  const totalVerifiedSteps = verifiedPeriodLogs.reduce((sum, log) => sum + Number(log.steps || 0), 0);
+  const pendingCount = periodLogs.filter((log) => log.verificationStatus === 'NEEDS_REVIEW').length;
 
   const departmentLeaderboard = useMemo(() => allDepartments.map((department) => {
-    const departmentUsers = activeUsers.filter((user) => isSameDepartment(user.departmentId, department.id));
-    const departmentUserKeys = new Set(departmentUsers.flatMap((user) => [normalizeText(user.employeeId), normalizeText(user.email)]));
-    const departmentLogs = logsInSelectedPeriod.filter((log) =>
-      departmentUserKeys.has(normalizeText(log.employeeId)) || departmentUserKeys.has(normalizeText(log.userEmail))
-    );
+    const departmentUsers = activeUsers.filter((user) => normalizeDeptKey(resolveDepartment(user.departmentId)?.id || user.departmentId) === normalizeDeptKey(department.id));
+    const keys = new Set(departmentUsers.flatMap((user) => [normalizeText(user.employeeId), normalizeText(user.email)]));
+    const departmentLogs = verifiedPeriodLogs.filter((log) => keys.has(normalizeText(log.employeeId)) || keys.has(normalizeText(log.userEmail)));
     const participants = new Set(departmentLogs.map((log) => normalizeText(log.employeeId || log.userEmail))).size;
-    const totalSteps = departmentLogs.reduce((sum, log) => sum + (Number(log.steps) || 0), 0);
-    const rate = departmentUsers.length > 0 ? Math.round((participants / departmentUsers.length) * 100) : 0;
-
+    const totalSteps = departmentLogs.reduce((sum, log) => sum + Number(log.steps || 0), 0);
     return {
       ...department,
       memberCount: departmentUsers.length,
       participantCount: participants,
-      participationRate: rate,
       totalSteps,
-      averageSteps: participants > 0 ? Math.round(totalSteps / participants) : 0
+      participationRate: departmentUsers.length ? Math.round((participants / departmentUsers.length) * 100) : 0,
+      averageSteps: participants ? Math.round(totalSteps / participants) : 0
     };
-  }).filter((department) => department.memberCount > 0).sort((a, b) => b.totalSteps - a.totalSteps), [allDepartments, activeUsers, logsInSelectedPeriod]);
+  }).filter((department) => department.memberCount > 0).sort((a, b) => b.totalSteps - a.totalSteps), [allDepartments, activeUsers, verifiedPeriodLogs]);
 
   const topWalkers = useMemo(() => {
     const totals = new Map<string, number>();
-    logsInSelectedPeriod.forEach((log) => {
+    verifiedPeriodLogs.forEach((log) => {
       const key = normalizeText(log.employeeId || log.userEmail);
-      totals.set(key, (totals.get(key) || 0) + (Number(log.steps) || 0));
+      totals.set(key, (totals.get(key) || 0) + Number(log.steps || 0));
     });
+    return Array.from(totals.entries()).map(([key, steps]) => ({
+      user: users.find((user) => normalizeText(user.employeeId) === key || normalizeText(user.email) === key),
+      steps
+    })).filter((item) => item.user).sort((a, b) => b.steps - a.steps).slice(0, 10);
+  }, [verifiedPeriodLogs, users]);
 
-    return Array.from(totals.entries())
-      .map(([key, steps]) => {
-        const user = users.find((item) => normalizeText(item.employeeId) === key || normalizeText(item.email) === key);
-        return { user, steps };
-      })
-      .filter((item) => item.user)
-      .sort((a, b) => b.steps - a.steps)
-      .slice(0, 10);
-  }, [logsInSelectedPeriod, users]);
-
-  const selectedPeriodLabel = reportMonthFilter === 'all'
+  const selectedPeriodLabel = monthFilter === 'all'
     ? 'ทั้งโครงการ'
-    : `${getCampaignMonth(Number(reportMonthFilter)).label}${reportWeekFilter === 'all' ? '' : ` · สัปดาห์ที่ ${reportWeekFilter}`}`;
+    : `${getCampaignMonth(Number(monthFilter)).label}${weekFilter === 'all' ? '' : ` · สัปดาห์ที่ ${weekFilter}`}`;
 
-  const handleDeleteLogClick = async (logId: string) => {
-    if (!window.confirm('ยืนยันลบรายการนี้? ข้อมูลจะถูกนำออกจาก Dashboard และ Leaderboard และไม่สามารถกู้คืนได้')) return;
+  const handleReview = async (log: AdminLog, nextStatus: 'APPROVED' | 'REJECTED') => {
+    const note = nextStatus === 'REJECTED'
+      ? window.prompt('ระบุเหตุผลที่ไม่อนุมัติหลักฐาน', log.reviewNote || '')
+      : window.prompt('หมายเหตุการอนุมัติ (เว้นว่างได้)', log.reviewNote || '');
+    if (note === null) return;
+    setReviewingId(log.id);
     try {
-      await deleteUserLog(logId);
-      setLogs((previous) => previous.filter((log) => log.id !== logId));
+      const updated = await reviewUserLog(log.id, nextStatus, note, 'Admin');
+      setLogs((previous) => previous.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      const refreshedUsers = await fetchAllUsers();
+      setUsers(refreshedUsers as AdminUser[]);
+    } catch (error: any) {
+      window.alert(error?.message || 'ไม่สามารถอัปเดตผลตรวจได้');
+    } finally {
+      setReviewingId('');
+    }
+  };
+
+  const handleDelete = async (log: AdminLog) => {
+    if (!window.confirm('ยืนยันลบรายการและย้ายไฟล์หลักฐานไปถังขยะใน Google Drive?')) return;
+    try {
+      await deleteUserLog(log.id);
+      await loadAdminData();
     } catch (error: any) {
       window.alert(error?.message || 'ไม่สามารถลบรายการได้');
     }
   };
 
-  const handleAddUserSubmit = async (event: React.FormEvent) => {
+  const handleAddEmployee = async (event: React.FormEvent) => {
     event.preventDefault();
-    setNewEmpError('');
-    const formattedId = newEmpId.trim();
-
-    if (!/^\d{6}$/.test(formattedId)) return setNewEmpError('รหัสพนักงานต้องเป็นตัวเลข 6 หลัก');
-    if (!newEmpName.trim()) return setNewEmpError('กรุณากรอกชื่อจริง');
-    if (!newEmpSurname.trim()) return setNewEmpError('กรุณากรอกนามสกุล');
-    if (!newEmpNickname.trim()) return setNewEmpError('กรุณากรอกชื่อเล่น');
-    if (!newEmpBirthDate) return setNewEmpError('กรุณาระบุวันเกิด เพื่อคำนวณอายุและสร้างรหัสผ่านอัตโนมัติ');
-
+    setNewEmployeeError('');
+    if (!/^\d{6}$/.test(newEmployee.id)) return setNewEmployeeError('รหัสพนักงานต้องเป็นตัวเลข 6 หลัก');
+    if (!newEmployee.name.trim() || !newEmployee.surname.trim() || !newEmployee.nickname.trim() || !newEmployee.birthDate) return setNewEmployeeError('กรุณากรอกข้อมูลให้ครบ');
     setIsSavingUser(true);
     try {
-      const newUser: ActiveUser = {
-        employeeId: formattedId,
-        email: `${formattedId}@thairathgroup.com`,
-        name: newEmpName.trim(),
-        surname: newEmpSurname.trim(),
-        nickname: newEmpNickname.trim(),
-        departmentId: newEmpDept,
+      await createUserOrUpdateProfile(newEmployee.id, {
+        employeeId: newEmployee.id,
+        email: `${newEmployee.id}@thairathgroup.com`,
+        name: newEmployee.name.trim(),
+        surname: newEmployee.surname.trim(),
+        nickname: newEmployee.nickname.trim(),
+        departmentId: newEmployee.departmentId || allDepartments[0]?.id || '',
         weekTarget: CAMPAIGN_WEEKLY_TARGET,
         totalTickets: 0,
-        dateOfBirth: newEmpBirthDate
-      };
-      await createUserOrUpdateProfile(formattedId, newUser);
-      setNewEmpId('');
-      setNewEmpName('');
-      setNewEmpSurname('');
-      setNewEmpNickname('');
-      setNewEmpBirthDate('');
+        dateOfBirth: newEmployee.birthDate
+      });
       setShowAddUserModal(false);
+      setNewEmployee({ id: '', name: '', surname: '', nickname: '', departmentId: allDepartments[0]?.id || '', birthDate: '' });
       await loadAdminData();
     } catch (error: any) {
-      setNewEmpError(error?.message || 'ไม่สามารถบันทึกข้อมูลพนักงานได้');
+      setNewEmployeeError(error?.message || 'ไม่สามารถเพิ่มพนักงานได้');
     } finally {
       setIsSavingUser(false);
     }
   };
 
-  const handleUpdateTickets = async () => {
-    if (!adjustingUser?.employeeId) return;
-    setIsUpdatingTickets(true);
-    try {
-      const newTicketCount = Math.max(0, Number(adjustingUser.totalTickets || 0) + ticketDelta);
-      await updateUserTickets(adjustingUser.employeeId, newTicketCount);
-      setUsers((previous) => previous.map((user) =>
-        user.employeeId === adjustingUser.employeeId ? { ...user, totalTickets: newTicketCount } : user
-      ));
-      setAdjustingUser(null);
-    } catch (error: any) {
-      window.alert(error?.message || 'ไม่สามารถปรับจำนวนตั๋วได้');
-    } finally {
-      setIsUpdatingTickets(false);
-    }
-  };
-
-  const exportEmployees = () => {
-    const rows = [
-      ['รหัสพนักงาน', 'ชื่อ-นามสกุล', 'ชื่อเล่น', 'ฝ่าย', 'อายุ', 'Login ล่าสุด', 'ส่งผลล่าสุด', 'ตั๋วสะสม', 'สถานะ'],
-      ...filteredUsers.map((user) => [
-        user.employeeId || '',
-        getDisplayName(user),
-        user.nickname || '',
-        resolveDepartment(user.departmentId)?.nameTh || user.departmentId || 'ไม่ระบุฝ่าย',
-        user.age || '',
-        formatDateTime(user.lastLoginAt),
-        formatDateTime(user.lastSubmitAt || latestSubmitByEmployee.get(normalizeText(user.employeeId)) || latestSubmitByEmployee.get(normalizeText(user.email))),
-        user.totalTickets || 0,
-        user.status || 'Active'
-      ])
-    ];
-    downloadCsv(`thairath_step_up_employees_${new Date().toISOString().slice(0, 10)}.csv`, rows);
-  };
-
-  const exportSubmissions = () => {
-    const rows = [
-      ['เดือน', 'สัปดาห์', 'รหัสพนักงาน', 'ชื่อพนักงาน', 'ฝ่าย', 'วันที่อ้างอิง', 'จำนวนก้าว', 'ไฟล์หลักฐาน', 'เวลาที่ส่ง'],
-      ...filteredLogs.map((log) => {
+  const exportEvidence = () => {
+    downloadCsv(`thairath_step_up_evidence_${new Date().toISOString().slice(0, 10)}.csv`, [
+      ['เดือน', 'สัปดาห์', 'รหัสพนักงาน', 'ชื่อ', 'ฝ่าย', 'ยอดกรอก', 'OCR', 'OCR Confidence', 'สถานะ', 'หลักฐาน', 'หมายเหตุ', 'เวลาส่ง'],
+      ...filteredEvidence.map((log) => {
         const user = findUserForLog(log);
-        return [
-          getCampaignMonth(Number(log.week)).label,
-          log.weekOfMonth ? `สัปดาห์ที่ ${log.weekOfMonth}` : 'ข้อมูลเดิม',
-          user?.employeeId || log.employeeId || '',
-          getDisplayName(user),
-          resolveDepartment(user?.departmentId)?.nameTh || user?.departmentId || 'ไม่ระบุฝ่าย',
-          log.date,
-          log.steps,
-          log.imageName,
-          formatDateTime(log.submittedAt)
-        ];
+        return [getCampaignMonth(Number(log.week)).label, log.weekOfMonth, log.employeeId, getDisplayName(user), resolveDepartment(user?.departmentId)?.nameTh || user?.departmentId, log.steps, log.ocrSteps || '', log.ocrConfidence || 0, log.verificationStatus, log.imageUrl, log.reviewNote || '', formatDateTime(log.submittedAt)];
       })
-    ];
-    downloadCsv(`thairath_step_up_submissions_${new Date().toISOString().slice(0, 10)}.csv`, rows);
+    ]);
   };
 
   const metricCards = [
-    { label: 'พนักงาน Active', value: activeUsers.length, suffix: 'คน', helper: 'ฐานพนักงานที่เปิดใช้งาน', icon: Users, className: 'bg-emerald-50 text-[#00914E]' },
-    { label: 'ส่งผลแล้ว', value: submittedEmployees, suffix: 'คน', helper: selectedPeriodLabel, icon: CheckCircle2, className: 'bg-blue-50 text-blue-600' },
-    { label: 'ยังไม่ส่งผล', value: notSubmittedEmployees, suffix: 'คน', helper: 'เทียบกับพนักงาน Active', icon: UserX, className: 'bg-rose-50 text-rose-600' },
-    { label: 'Participation Rate', value: participationRate, suffix: '%', helper: `${scopedTotalSteps.toLocaleString()} ก้าวในช่วงที่เลือก`, icon: Footprints, className: 'bg-amber-50 text-amber-600' }
+    { label: 'พนักงาน Active', value: activeUsers.length, suffix: 'คน', helper: 'ฐานพนักงาน', icon: Users, className: 'bg-emerald-50 text-[#00914E]' },
+    { label: 'ผ่านตรวจแล้ว', value: verifiedPeriodLogs.length, suffix: 'รายการ', helper: selectedPeriodLabel, icon: FileCheck2, className: 'bg-blue-50 text-blue-600' },
+    { label: 'รอตรวจ', value: pendingCount, suffix: 'รายการ', helper: 'ยังไม่นับผล', icon: ShieldAlert, className: 'bg-amber-50 text-amber-600' },
+    { label: 'Participation', value: participationRate, suffix: '%', helper: `${totalVerifiedSteps.toLocaleString()} ก้าวที่ผ่านตรวจ`, icon: Footprints, className: 'bg-violet-50 text-violet-600' }
   ];
 
   return (
     <div className="min-h-screen bg-[#F2F4F7] text-[#344054] font-sans pb-24">
-      <header className="bg-black text-white py-4 px-5 shadow-md">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <header className="bg-black text-white sticky top-0 z-40 shadow-lg">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="bg-[#00914E] text-white p-2.5 rounded-xl"><ShieldAlert className="w-5 h-5" /></div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-base md:text-lg font-black tracking-tight">THAIRATH STEP UP · Admin Center</h1>
-                <span className="text-[9px] bg-[#00914E] text-white font-extrabold px-2 py-0.5 rounded uppercase tracking-wider">Google Sheets Live</span>
-              </div>
-              <p className="text-[11px] text-gray-300 font-medium mt-1">บริหารผู้ใช้งาน ตรวจสอบการส่งผล และติดตาม Participation ของโครงการ</p>
-            </div>
+            <button onClick={onExit} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
+            <div><p className="font-black text-lg">Thairath Step Up Admin</p><p className="text-[10px] text-slate-400">Evidence Verification · v2.2</p></div>
           </div>
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <a href={DATABASE_URL} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 px-3 py-2 rounded-xl text-xs font-bold transition-colors">
-              <ExternalLink className="w-4 h-4" /> เปิด Google Sheets
-            </a>
-            <button onClick={onExit} className="flex items-center gap-1.5 bg-white text-black hover:bg-slate-100 px-3 py-2 rounded-xl text-xs font-bold cursor-pointer">
-              <ArrowLeft className="w-4 h-4" /> กลับหน้าหลัก
-            </button>
+          <div className="flex gap-2">
+            <a href={DATABASE_URL} target="_blank" rel="noreferrer" className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2"><FileSpreadsheet className="w-4 h-4" />Google Sheets<ExternalLink className="w-3 h-3" /></a>
+            <button onClick={() => void loadAdminData()} className="bg-[#00914E] hover:bg-[#00703c] px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />Refresh</button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 md:px-6 pt-7 space-y-7">
-        <section className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 shadow-xs">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#00914E]">Reporting Scope</p>
-              <h2 className="font-black text-black mt-1">ช่วงข้อมูลที่ใช้คำนวณ Dashboard และ Leaderboard</h2>
-              <p className="text-xs text-slate-500 mt-1">ปัจจุบันเลือก: {selectedPeriodLabel}</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <select value={reportMonthFilter} onChange={(event) => { setReportMonthFilter(event.target.value); setReportWeekFilter('all'); }} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]">
-                <option value="all">ทุกเดือน · ทั้งโครงการ</option>
-                {CAMPAIGN_MONTHS.map((month) => <option key={month.number} value={month.number}>{month.label}</option>)}
-              </select>
-              <select value={reportWeekFilter} onChange={(event) => setReportWeekFilter(event.target.value)} disabled={reportMonthFilter === 'all'} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-[#00914E] disabled:opacity-50">
-                <option value="all">ทุกสัปดาห์ในเดือน</option>
-                {(reportMonthFilter === 'all' ? [] : getCampaignMonth(Number(reportMonthFilter)).weeks).map((week) => <option key={week.number} value={week.number}>{week.label} · {week.range}</option>)}
-              </select>
-              <button onClick={loadAdminData} className="bg-[#00914E] text-white hover:bg-[#00703c] px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
-                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} /> รีเฟรชข้อมูล
-              </button>
-            </div>
-          </div>
+      <main className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        {loadError && <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-xl text-xs font-bold">{loadError}</div>}
+
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {metricCards.map((card) => <article key={card.label} className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-xs"><div className={`w-9 h-9 rounded-xl flex items-center justify-center ${card.className}`}><card.icon className="w-5 h-5" /></div><p className="text-[10px] text-slate-400 font-bold mt-3">{card.label}</p><p className="text-2xl md:text-3xl font-black text-black mt-1">{card.value}<span className="text-xs ml-1 text-slate-500">{card.suffix}</span></p><p className="text-[9px] text-slate-400 mt-1">{card.helper}</p></article>)}
         </section>
 
-        {loadError && <div className="bg-rose-50 border border-rose-100 text-rose-700 rounded-xl px-4 py-3 text-xs font-bold">{loadError}</div>}
-
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5">
-          {metricCards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <article key={card.label} className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-xs min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-[10px] md:text-[11px] text-slate-500 font-extrabold leading-relaxed">{card.label}</p>
-                  <div className={`p-2 rounded-xl ${card.className}`}><Icon className="w-4 h-4" /></div>
-                </div>
-                <div className="mt-3 flex items-baseline gap-1.5"><span className="text-2xl md:text-3xl font-black text-black tabular-nums">{card.value}</span><span className="text-xs font-bold text-slate-500">{card.suffix}</span></div>
-                <p className="text-[9px] md:text-[10px] text-slate-400 font-semibold mt-1.5 truncate" title={card.helper}>{card.helper}</p>
-              </article>
-            );
-          })}
+        <section className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap gap-3 items-center">
+          <select value={monthFilter} onChange={(event) => { setMonthFilter(event.target.value); setWeekFilter('all'); }} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold">
+            <option value="all">ทุกเดือน</option>{CAMPAIGN_MONTHS.map((month) => <option key={month.number} value={month.number}>{month.label}</option>)}
+          </select>
+          <select value={weekFilter} onChange={(event) => setWeekFilter(event.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold">
+            <option value="all">ทุกสัปดาห์</option>{monthFilter !== 'all' && getCampaignMonth(Number(monthFilter)).weeks.map((week) => <option key={week.number} value={week.number}>{week.label}</option>)}
+          </select>
+          <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold max-w-[240px]">
+            <option value="all">ทุกฝ่าย</option>{allDepartments.map((department) => <option key={department.id} value={department.id}>{department.nameTh}</option>)}
+          </select>
+          <div className="relative flex-1 min-w-[220px]"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="ค้นหารหัส ชื่อ ชื่อเล่น หรือไฟล์" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]" /></div>
         </section>
 
-        <nav className="flex gap-2 overflow-x-auto border-b border-slate-200 scrollbar-none">
-          {[
-            { id: 'employees', label: `ฐานข้อมูลพนักงาน (${filteredUsers.length}/${users.length})`, icon: Users },
-            { id: 'submissions', label: `รายการส่งผล (${filteredLogs.length}/${logsInSelectedPeriod.length})`, icon: FileSpreadsheet },
-            { id: 'leaderboard', label: 'Leaderboard & Participation', icon: Trophy }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeSubTab === tab.id;
-            return (
-              <button key={tab.id} onClick={() => setActiveSubTab(tab.id as typeof activeSubTab)} className={`pb-3 px-2 text-xs md:text-sm font-extrabold flex items-center gap-2 whitespace-nowrap border-b-3 cursor-pointer ${active ? 'text-[#00914E] border-[#00914E]' : 'text-slate-500 border-transparent hover:text-black'}`}>
-                <Icon className="w-4 h-4" /> {tab.label}
-              </button>
-            );
-          })}
+        <nav className="flex gap-2 overflow-x-auto">
+          {([
+            ['evidence', `ตรวจหลักฐาน (${pendingCount})`, ShieldAlert],
+            ['employees', `พนักงาน (${filteredUsers.length})`, Users],
+            ['leaderboard', 'Leaderboard', Trophy]
+          ] as const).map(([id, label, Icon]) => <button key={id} onClick={() => setActiveTab(id)} className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 whitespace-nowrap cursor-pointer ${activeTab === id ? 'bg-black text-white' : 'bg-white border border-slate-200 text-slate-600'}`}><Icon className="w-4 h-4" />{label}</button>)}
         </nav>
 
-        {activeSubTab === 'employees' && (
-          <section className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="p-4 md:p-5 bg-slate-50 border-b border-slate-200 flex flex-col lg:flex-row gap-3 justify-between">
-              <div className="relative w-full lg:w-96">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input value={userSearchText} onChange={(event) => setUserSearchText(event.target.value)} placeholder="ค้นหาด้วยชื่อ รหัสพนักงาน ชื่อเล่น หรืออีเมล" className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]" />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <select value={userDeptFilter} onChange={(event) => setUserDeptFilter(event.target.value)} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold outline-none">
-                  <option value="all">ทุกฝ่าย</option>
-                  {allDepartments.map((department) => <option key={department.id} value={department.id}>{department.nameTh}</option>)}
-                </select>
-                <button onClick={exportEmployees} className="bg-white border border-[#00914E] text-[#00914E] hover:bg-[#E8F5E9] px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Export CSV</button>
-                <button onClick={() => setShowAddUserModal(true)} className="bg-[#00914E] text-white hover:bg-[#00703c] px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"><UserPlus className="w-4 h-4" /> เพิ่มพนักงาน</button>
-              </div>
+        {activeTab === 'evidence' && (
+          <section className="space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-2">{(['NEEDS_REVIEW', 'AUTO_VERIFIED', 'APPROVED', 'REJECTED', 'all'] as const).map((status) => <button key={status} onClick={() => setVerificationFilter(status)} className={`px-3 py-2 rounded-lg text-[10px] font-extrabold border cursor-pointer ${verificationFilter === status ? 'bg-black text-white border-black' : 'bg-white text-slate-600 border-slate-200'}`}>{status === 'all' ? 'ทั้งหมด' : STATUS_META[status].label}</button>)}</div>
+              <button onClick={exportEvidence} className="px-3 py-2 rounded-lg bg-slate-100 text-xs font-bold flex items-center gap-2 cursor-pointer"><Download className="w-4 h-4" />Export</button>
             </div>
 
-            {isLoading ? (
-              <div className="p-14 text-center"><RefreshCw className="w-7 h-7 animate-spin mx-auto text-[#00914E]" /><p className="text-xs font-bold text-slate-500 mt-3">กำลังโหลดฐานข้อมูลพนักงาน...</p></div>
-            ) : filteredUsers.length === 0 ? (
-              <div className="p-14 text-center text-slate-400 text-xs font-bold">ไม่พบพนักงานที่ตรงกับตัวกรอง</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1050px] text-left text-xs border-collapse">
-                  <thead><tr className="bg-slate-100/80 text-slate-500 font-extrabold border-b border-slate-200">
-                    <th className="py-4 px-5">รหัสพนักงาน</th><th className="py-4 px-5">ชื่อ-นามสกุล / ชื่อเล่น</th><th className="py-4 px-5">ฝ่าย</th><th className="py-4 px-5">Login ล่าสุด</th><th className="py-4 px-5">ส่งผลล่าสุด</th><th className="py-4 px-5 text-center">ตั๋วสะสม</th><th className="py-4 px-5 text-right">ดำเนินการ</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredUsers.map((user) => {
-                      const department = resolveDepartment(user.departmentId);
-                      const latestSubmit = user.lastSubmitAt || latestSubmitByEmployee.get(normalizeText(user.employeeId)) || latestSubmitByEmployee.get(normalizeText(user.email));
-                      return (
-                        <tr key={user.employeeId || user.email} className="hover:bg-slate-50 transition-colors">
-                          <td className="py-4 px-5 font-bold text-[#00914E] tabular-nums">{user.employeeId}</td>
-                          <td className="py-4 px-5"><p className="font-extrabold text-black">{getDisplayName(user)}</p><p className="text-[10px] text-slate-400 mt-0.5">ชื่อเล่น: {user.nickname || '-'} {user.age ? `· อายุ ${user.age} ปี` : ''}</p></td>
-                          <td className="py-4 px-5"><span className="inline-flex items-center gap-1.5 bg-[#E8F5E9] text-[#00914E] px-2.5 py-1.5 rounded-lg font-bold text-[10px]"><Building className="w-3 h-3" />{department?.nameTh || user.departmentId || 'ไม่ระบุฝ่าย'}</span></td>
-                          <td className="py-4 px-5 text-[10px] font-bold text-slate-600 whitespace-nowrap">{formatDateTime(user.lastLoginAt, 'ยังไม่เคย Login')}</td>
-                          <td className="py-4 px-5 text-[10px] font-bold text-slate-600 whitespace-nowrap">{formatDateTime(latestSubmit, 'ยังไม่เคยส่งผล')}</td>
-                          <td className="py-4 px-5 text-center"><span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-xl font-black border border-amber-100"><Ticket className="w-4 h-4" />{user.totalTickets || 0} ใบ</span></td>
-                          <td className="py-4 px-5 text-right"><button onClick={() => { setAdjustingUser(user); setTicketDelta(1); }} className="bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer">ปรับตั๋ว</button></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            {isLoading ? <div className="bg-white rounded-2xl p-16 text-center"><RefreshCw className="w-7 h-7 animate-spin mx-auto text-[#00914E]" /></div> : filteredEvidence.length === 0 ? <div className="bg-white rounded-2xl p-16 text-center text-slate-400 text-sm font-bold">ไม่พบหลักฐานตามตัวกรอง</div> : (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {filteredEvidence.map((log) => {
+                  const user = findUserForLog(log);
+                  const status = STATUS_META[log.verificationStatus];
+                  const exactMatch = Number(log.ocrSteps) === Number(log.steps) && Number(log.ocrSteps) > 0;
+                  return <article key={log.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-[190px_1fr] min-h-[260px]">
+                      <div className="bg-slate-100 flex items-center justify-center p-3">
+                        {evidenceThumbnail(log) ? <img src={evidenceThumbnail(log)} alt="Evidence" className="w-full h-52 object-contain bg-white rounded-xl border border-slate-200" referrerPolicy="no-referrer" /> : <div className="text-slate-400 text-xs font-bold">ไม่มี Preview</div>}
+                      </div>
+                      <div className="p-5 space-y-4">
+                        <div className="flex items-start justify-between gap-3"><div><p className="font-black text-black">{getDisplayName(user) || log.userEmail}</p><p className="text-[10px] text-slate-400 mt-1">{log.employeeId} · {resolveDepartment(user?.departmentId)?.nameTh || user?.departmentId || 'ไม่ระบุฝ่าย'}</p></div><span className={`px-2.5 py-1 rounded-full border text-[9px] font-extrabold ${status.className}`}>{status.label}</span></div>
+                        <div className="grid grid-cols-2 gap-2"><div className="bg-slate-50 rounded-xl p-3"><p className="text-[9px] text-slate-400 font-bold">ยอดที่กรอก</p><p className="text-xl font-black text-black">{Number(log.steps).toLocaleString()}</p></div><div className={`rounded-xl p-3 ${exactMatch ? 'bg-emerald-50' : 'bg-amber-50'}`}><p className="text-[9px] text-slate-500 font-bold">OCR · {log.ocrConfidence || 0}%</p><p className={`text-xl font-black ${exactMatch ? 'text-emerald-700' : 'text-amber-700'}`}>{log.ocrSteps?.toLocaleString() || 'อ่านไม่พบ'}</p></div></div>
+                        <div className="text-[10px] text-slate-500 space-y-1"><p>{getCampaignMonth(Number(log.week)).label} · สัปดาห์ที่ {log.weekOfMonth}</p><p>ส่งเมื่อ {formatDateTime(log.submittedAt)}</p>{log.reviewNote && <p className="text-rose-600">หมายเหตุ: {log.reviewNote}</p>}</div>
+                        <div className="flex flex-wrap gap-2">
+                          {log.imageUrl && <a href={log.imageUrl} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-bold flex items-center gap-1"><Eye className="w-3.5 h-3.5" />เปิดรูปเต็ม</a>}
+                          <button disabled={reviewingId === log.id} onClick={() => void handleReview(log, 'APPROVED')} className="px-3 py-2 rounded-lg bg-[#00914E] text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"><CheckCircle2 className="w-3.5 h-3.5" />Approve</button>
+                          <button disabled={reviewingId === log.id} onClick={() => void handleReview(log, 'REJECTED')} className="px-3 py-2 rounded-lg bg-rose-600 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"><XCircle className="w-3.5 h-3.5" />Reject</button>
+                          <button onClick={() => void handleDelete(log)} className="ml-auto p-2 rounded-lg bg-rose-50 text-rose-600 cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                    </div>
+                  </article>;
+                })}
               </div>
             )}
           </section>
         )}
 
-        {activeSubTab === 'submissions' && (
-          <section className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="p-4 md:p-5 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row gap-3 justify-between">
-              <div className="relative w-full md:w-96">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input value={logSearchText} onChange={(event) => setLogSearchText(event.target.value)} placeholder="ค้นหาชื่อ รหัสพนักงาน อีเมล หรือชื่อไฟล์" className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold outline-none focus:border-[#00914E]" />
-              </div>
-              <button onClick={exportSubmissions} className="bg-white border border-[#00914E] text-[#00914E] hover:bg-[#E8F5E9] px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Export ตามตัวกรอง</button>
-            </div>
-
-            {isLoading ? (
-              <div className="p-14 text-center"><RefreshCw className="w-7 h-7 animate-spin mx-auto text-[#00914E]" /><p className="text-xs font-bold text-slate-500 mt-3">กำลังโหลดรายการส่งผล...</p></div>
-            ) : filteredLogs.length === 0 ? (
-              <div className="p-14 text-center text-slate-400 text-xs font-bold">ไม่พบรายการส่งผลในช่วงที่เลือก</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1050px] text-left text-xs border-collapse">
-                  <thead><tr className="bg-slate-100/80 text-slate-500 font-extrabold border-b border-slate-200">
-                    <th className="py-4 px-5">เดือน / สัปดาห์</th><th className="py-4 px-5">พนักงาน</th><th className="py-4 px-5">ฝ่าย</th><th className="py-4 px-5 text-right">จำนวนก้าว</th><th className="py-4 px-5">หลักฐาน</th><th className="py-4 px-5">เวลาที่ส่ง</th><th className="py-4 px-5 text-right">ลบ</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredLogs.map((log) => {
-                      const user = findUserForLog(log);
-                      const department = resolveDepartment(user?.departmentId);
-                      return (
-                        <tr key={log.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="py-4 px-5"><p className="font-extrabold text-[#00914E]">{getCampaignMonth(Number(log.week)).shortLabel}</p><p className="text-[10px] text-slate-400 mt-0.5">{log.weekOfMonth ? `สัปดาห์ที่ ${log.weekOfMonth}` : 'ข้อมูลเดิม'}</p></td>
-                          <td className="py-4 px-5"><p className="font-extrabold text-black">{user ? getDisplayName(user) : log.userEmail}</p><p className="text-[10px] text-slate-400 mt-0.5">{user?.employeeId || log.employeeId || '-'}</p></td>
-                          <td className="py-4 px-5 text-[10px] font-bold text-slate-600">{department?.nameTh || user?.departmentId || 'ไม่ระบุฝ่าย'}</td>
-                          <td className="py-4 px-5 text-right font-black text-black text-sm tabular-nums">{Number(log.steps).toLocaleString()} ก้าว</td>
-                          <td className="py-4 px-5"><p className="max-w-[180px] truncate text-[10px] font-semibold text-slate-500" title={log.imageName}>{log.imageName || 'ไม่มีชื่อไฟล์'}</p></td>
-                          <td className="py-4 px-5 text-[10px] font-bold text-slate-500 whitespace-nowrap">{formatDateTime(log.submittedAt)}</td>
-                          <td className="py-4 px-5 text-right"><button onClick={() => handleDeleteLogClick(log.id)} className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white border border-rose-100 p-2 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+        {activeTab === 'employees' && (
+          <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between"><div><h3 className="font-black text-black">ฐานพนักงาน</h3><p className="text-[10px] text-slate-400">คูปองคำนวณจากรายการผ่านตรวจ ≥ 7,000 เท่านั้น</p></div><button onClick={() => setShowAddUserModal(true)} className="bg-[#00914E] text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 cursor-pointer"><UserPlus className="w-4 h-4" />เพิ่มพนักงาน</button></div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-xs"><thead><tr className="bg-slate-50 text-slate-500"><th className="p-4 text-left">รหัส</th><th className="p-4 text-left">ชื่อ</th><th className="p-4 text-left">ฝ่าย</th><th className="p-4 text-left">Login ล่าสุด</th><th className="p-4 text-left">ส่งล่าสุด</th><th className="p-4 text-center">คูปองผ่านตรวจ</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredUsers.map((user) => <tr key={user.employeeId} className="hover:bg-slate-50"><td className="p-4 font-black text-[#00914E]">{user.employeeId}</td><td className="p-4"><p className="font-bold text-black">{getDisplayName(user)}</p><p className="text-[9px] text-slate-400">{user.nickname}</p></td><td className="p-4 font-bold text-slate-600">{resolveDepartment(user.departmentId)?.nameTh || user.departmentId}</td><td className="p-4 text-[10px]">{formatDateTime(user.lastLoginAt)}</td><td className="p-4 text-[10px]">{formatDateTime(user.lastSubmitAt)}</td><td className="p-4 text-center"><span className="bg-amber-50 text-amber-700 px-3 py-1 rounded-full font-black">{user.totalTickets || 0} ใบ</span></td></tr>)}</tbody></table></div>
           </section>
         )}
 
-        {activeSubTab === 'leaderboard' && (
+        {activeTab === 'leaderboard' && (
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <article className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 md:p-6">
-              <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
-                <div><h3 className="font-black text-black flex items-center gap-2"><Building className="w-5 h-5 text-[#00914E]" />อันดับรายฝ่าย</h3><p className="text-[10px] text-slate-400 mt-1">คำนวณจาก {selectedPeriodLabel}</p></div>
-                <span className="text-[9px] bg-[#E8F5E9] text-[#00914E] px-2 py-1 rounded font-extrabold">LIVE</span>
-              </div>
-              <div className="space-y-3 mt-5">
-                {departmentLeaderboard.length === 0 ? <p className="text-center py-10 text-xs text-slate-400 font-bold">ยังไม่มีข้อมูลในช่วงที่เลือก</p> : departmentLeaderboard.map((department, index) => (
-                  <div key={department.id} className="flex items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="flex items-center gap-3 min-w-0"><span className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${index < 3 ? 'bg-amber-100 text-amber-800' : 'bg-white text-slate-500 border border-slate-200'}`}>{index + 1}</span><div className="min-w-0"><p className="font-extrabold text-xs text-black truncate">{department.nameTh}</p><p className="text-[9px] text-slate-400 mt-0.5">ส่ง {department.participantCount}/{department.memberCount} คน · {department.participationRate}%</p></div></div>
-                    <div className="text-right shrink-0"><p className="font-black text-[#00914E] text-xs tabular-nums">{department.totalSteps.toLocaleString()} ก้าว</p><p className="text-[9px] text-slate-400 mt-0.5">เฉลี่ย {department.averageSteps.toLocaleString()}/คน</p></div>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 md:p-6">
-              <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
-                <div><h3 className="font-black text-black flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" />Top Walkers</h3><p className="text-[10px] text-slate-400 mt-1">ยอดก้าวรวมรายบุคคลใน {selectedPeriodLabel}</p></div>
-                <span className="text-[9px] bg-amber-50 text-amber-700 px-2 py-1 rounded font-extrabold">TOP 10</span>
-              </div>
-              <div className="space-y-3 mt-5">
-                {topWalkers.length === 0 ? <p className="text-center py-10 text-xs text-slate-400 font-bold">ยังไม่มีข้อมูลในช่วงที่เลือก</p> : topWalkers.map(({ user, steps }, index) => (
-                  <div key={user?.employeeId || index} className="flex items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="flex items-center gap-3 min-w-0"><span className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${index < 3 ? 'bg-amber-100 text-amber-800' : 'bg-white text-slate-500 border border-slate-200'}`}>{index + 1}</span><div className="min-w-0"><p className="font-extrabold text-xs text-black truncate">{user?.name} ({user?.nickname || '-'})</p><p className="text-[9px] text-slate-400 mt-0.5">{user?.employeeId} · {resolveDepartment(user?.departmentId)?.nameTh || user?.departmentId || 'ไม่ระบุฝ่าย'}</p></div></div>
-                    <p className="font-black text-[#00914E] text-xs tabular-nums shrink-0">{steps.toLocaleString()} ก้าว</p>
-                  </div>
-                ))}
-              </div>
-            </article>
+            <article className="bg-white rounded-2xl border border-slate-200 p-5"><h3 className="font-black text-black flex items-center gap-2"><Building className="w-5 h-5 text-[#00914E]" />อันดับรายฝ่าย</h3><p className="text-[10px] text-slate-400 mt-1">ใช้เฉพาะข้อมูลที่ผ่านตรวจ · {selectedPeriodLabel}</p><div className="space-y-3 mt-5">{departmentLeaderboard.map((department, index) => <div key={department.id} className="flex justify-between gap-3 bg-slate-50 rounded-xl p-3"><div><p className="font-bold text-black text-xs">#{index + 1} {department.nameTh}</p><p className="text-[9px] text-slate-400">{department.participantCount}/{department.memberCount} คน · {department.participationRate}%</p></div><div className="text-right"><p className="font-black text-[#00914E] text-xs">{department.totalSteps.toLocaleString()} ก้าว</p><p className="text-[9px] text-slate-400">เฉลี่ย {department.averageSteps.toLocaleString()}</p></div></div>)}</div></article>
+            <article className="bg-white rounded-2xl border border-slate-200 p-5"><h3 className="font-black text-black flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" />Top Walkers</h3><p className="text-[10px] text-slate-400 mt-1">ยอดรวมที่ผ่านตรวจ</p><div className="space-y-3 mt-5">{topWalkers.map(({ user, steps }, index) => <div key={user?.employeeId || index} className="flex justify-between gap-3 bg-slate-50 rounded-xl p-3"><div><p className="font-bold text-black text-xs">#{index + 1} {user?.name} ({user?.nickname})</p><p className="text-[9px] text-slate-400">{user?.employeeId}</p></div><p className="font-black text-[#00914E] text-xs">{steps.toLocaleString()} ก้าว</p></div>)}</div></article>
           </section>
         )}
       </main>
 
-      {showAddUserModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
-          <div className="bg-white max-w-md w-full rounded-2xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100"><h3 className="font-black text-black flex items-center gap-2"><UserPlus className="w-5 h-5 text-[#00914E]" />เพิ่มพนักงาน</h3><button onClick={() => setShowAddUserModal(false)} className="text-slate-400 hover:text-black cursor-pointer">✕</button></div>
-            {newEmpError && <div className="mt-4 bg-rose-50 border border-rose-100 text-rose-700 p-3 rounded-xl text-xs font-bold">{newEmpError}</div>}
-            <form onSubmit={handleAddUserSubmit} className="space-y-4 mt-5 text-xs font-semibold">
-              <div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">รหัสพนักงาน 6 หลัก</label><input value={newEmpId} onChange={(event) => setNewEmpId(event.target.value.replace(/\D/g, ''))} maxLength={6} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" placeholder="เช่น 100344" /></div>
-              <div className="grid grid-cols-2 gap-3"><div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">ชื่อจริง</label><input value={newEmpName} onChange={(event) => setNewEmpName(event.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" /></div><div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">นามสกุล</label><input value={newEmpSurname} onChange={(event) => setNewEmpSurname(event.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" /></div></div>
-              <div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">ชื่อเล่น</label><input value={newEmpNickname} onChange={(event) => setNewEmpNickname(event.target.value)} maxLength={20} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" /></div>
-              <div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">ฝ่าย</label><select value={newEmpDept} onChange={(event) => setNewEmpDept(event.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold">{allDepartments.map((department) => <option key={department.id} value={department.id}>{department.nameTh}</option>)}</select></div>
-              <div><label className="block text-[10px] font-extrabold text-slate-500 mb-1">วันเกิด</label><input type="date" value={newEmpBirthDate} onChange={(event) => setNewEmpBirthDate(event.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 outline-none focus:border-[#00914E] font-bold" /><p className="text-[9px] text-slate-400 mt-1">ระบบจะคำนวณอายุและสร้าง Password รูปแบบ DDMMYY ปี พ.ศ. อัตโนมัติ</p></div>
-              <div className="flex gap-2 pt-2"><button type="button" onClick={() => setShowAddUserModal(false)} className="w-1/2 bg-slate-100 hover:bg-slate-200 py-3 rounded-xl font-bold cursor-pointer">ยกเลิก</button><button type="submit" disabled={isSavingUser} className="w-1/2 bg-[#00914E] hover:bg-[#00703c] disabled:opacity-50 text-white py-3 rounded-xl font-extrabold cursor-pointer">{isSavingUser ? 'กำลังบันทึก...' : 'บันทึกพนักงาน'}</button></div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {adjustingUser && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
-          <div className="bg-white max-w-sm w-full rounded-2xl shadow-2xl p-6">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100"><h3 className="font-black text-black flex items-center gap-2"><Ticket className="w-5 h-5 text-amber-500" />ปรับจำนวนตั๋ว</h3><button onClick={() => setAdjustingUser(null)} className="text-slate-400 hover:text-black cursor-pointer">✕</button></div>
-            <div className="mt-5 bg-[#E8F5E9] rounded-xl p-4"><p className="font-extrabold text-black text-sm">{adjustingUser.name} ({adjustingUser.nickname})</p><p className="text-[10px] text-slate-500 mt-1">{adjustingUser.employeeId} · ปัจจุบัน {adjustingUser.totalTickets || 0} ใบ</p></div>
-            <div className="flex items-center justify-center gap-5 py-8"><button onClick={() => setTicketDelta((value) => value - 1)} className="w-10 h-10 rounded-full bg-slate-100 text-lg font-black cursor-pointer">−</button><span className="text-3xl font-black tabular-nums w-20 text-center">{ticketDelta > 0 ? `+${ticketDelta}` : ticketDelta}</span><button onClick={() => setTicketDelta((value) => value + 1)} className="w-10 h-10 rounded-full bg-slate-100 text-lg font-black cursor-pointer">+</button></div>
-            <p className="text-center text-xs font-bold text-amber-700">ยอดใหม่: {Math.max(0, Number(adjustingUser.totalTickets || 0) + ticketDelta)} ใบ</p>
-            <div className="flex gap-2 mt-5"><button onClick={() => setAdjustingUser(null)} className="w-1/2 bg-slate-100 py-3 rounded-xl font-bold text-xs cursor-pointer">ยกเลิก</button><button onClick={handleUpdateTickets} disabled={isUpdatingTickets} className="w-1/2 bg-[#00914E] text-white py-3 rounded-xl font-extrabold text-xs cursor-pointer disabled:opacity-50">{isUpdatingTickets ? 'กำลังบันทึก...' : 'ยืนยัน'}</button></div>
-          </div>
-        </div>
-      )}
+      {showAddUserModal && <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4"><form onSubmit={handleAddEmployee} className="bg-white w-full max-w-md rounded-2xl p-6 space-y-4"><div className="flex justify-between"><h3 className="font-black text-black">เพิ่มพนักงาน</h3><button type="button" onClick={() => setShowAddUserModal(false)}>✕</button></div>{newEmployeeError && <div className="bg-rose-50 text-rose-700 p-3 rounded-xl text-xs font-bold">{newEmployeeError}</div>}<input value={newEmployee.id} onChange={(event) => setNewEmployee({ ...newEmployee, id: event.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="รหัสพนักงาน 6 หลัก" className="w-full bg-slate-50 border rounded-xl p-3 text-xs font-bold" /><div className="grid grid-cols-2 gap-3"><input value={newEmployee.name} onChange={(event) => setNewEmployee({ ...newEmployee, name: event.target.value })} placeholder="ชื่อ" className="bg-slate-50 border rounded-xl p-3 text-xs font-bold" /><input value={newEmployee.surname} onChange={(event) => setNewEmployee({ ...newEmployee, surname: event.target.value })} placeholder="นามสกุล" className="bg-slate-50 border rounded-xl p-3 text-xs font-bold" /></div><input value={newEmployee.nickname} onChange={(event) => setNewEmployee({ ...newEmployee, nickname: event.target.value })} placeholder="ชื่อเล่น" className="w-full bg-slate-50 border rounded-xl p-3 text-xs font-bold" /><select value={newEmployee.departmentId} onChange={(event) => setNewEmployee({ ...newEmployee, departmentId: event.target.value })} className="w-full bg-slate-50 border rounded-xl p-3 text-xs font-bold">{allDepartments.map((department) => <option key={department.id} value={department.id}>{department.nameTh}</option>)}</select><input type="date" value={newEmployee.birthDate} onChange={(event) => setNewEmployee({ ...newEmployee, birthDate: event.target.value })} className="w-full bg-slate-50 border rounded-xl p-3 text-xs font-bold" /><div className="flex gap-2"><button type="button" onClick={() => setShowAddUserModal(false)} className="w-1/2 bg-slate-100 rounded-xl py-3 text-xs font-bold">ยกเลิก</button><button disabled={isSavingUser} className="w-1/2 bg-[#00914E] text-white rounded-xl py-3 text-xs font-bold disabled:opacity-50">{isSavingUser ? 'กำลังบันทึก...' : 'บันทึก'}</button></div></form></div>}
     </div>
   );
 }
