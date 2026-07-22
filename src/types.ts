@@ -2,12 +2,12 @@ export type VerificationStatus = 'AUTO_VERIFIED' | 'NEEDS_REVIEW' | 'APPROVED' |
 
 export interface StepLog {
   id: string;
-  date: string; // YYYY-MM-DD
-  steps: number;
+  date: string;
+  steps: number; // weekly average daily steps shown in the evidence
   week: number; // campaign month index (1 to 6)
-  weekOfMonth?: number; // submission week within the selected month (1 to 5)
+  weekOfMonth?: number;
   imageName: string;
-  imagePreview?: string; // local preview only; never stored in Google Sheets
+  imagePreview?: string;
   imageFileId?: string;
   imageUrl?: string;
   ocrText?: string;
@@ -18,6 +18,8 @@ export interface StepLog {
   reviewedBy?: string;
   reviewedAt?: string;
   submittedAt: string;
+  buIdAtSubmission?: string;
+  departmentIdAtSubmission?: string;
 }
 
 export interface NewStepLogInput {
@@ -35,28 +37,65 @@ export interface NewStepLogInput {
 
 export interface DepartmentInfo {
   id: string;
+  buId: string;
   nameTh: string;
   nameEn: string;
-  participationRate: number; // verified submission percentage
-  averageStepsPerPerson: number; // verified steps per participating employee
+  participationRate: number;
+  averageStepsPerPerson: number; // average of each participant's verified weekly averages
+  memberCount?: number;
+  participantCount?: number;
+  submittedWeeks?: number;
   status: 'up' | 'down' | 'stable';
   statusText: string;
+}
+
+export interface BusinessUnitInfo {
+  id: string;
+  nameTh: string;
+  nameEn: string;
+  participationRate: number;
+  averageStepsPerPerson: number;
+  memberCount: number;
+  participantCount: number;
+  submittedWeeks?: number;
+  status: 'up' | 'down' | 'stable';
+  statusText: string;
+}
+
+export interface LeaderboardData {
+  departments: DepartmentInfo[];
+  businessUnits: BusinessUnitInfo[];
+  generatedAt: string;
 }
 
 export interface ActiveUser {
   name: string;
   surname?: string;
-  Surename?: string; // kept for Google Sheets header compatibility
+  Surename?: string;
   nickname: string;
+  buId: string;
   departmentId: string;
-  weekTarget: number; // campaign standard: 7000
-  totalTickets: number; // derived from verified logs that reach 7,000 steps
+  weekTarget: number;
+  totalTickets: number;
   email?: string;
   employeeId?: string;
   age?: number;
-  dateOfBirth?: string; // YYYY-MM-DD, used by Google Sheets backend to calculate age and birthdate password
-  lastLoginAt?: string; // ISO timestamp from Google Sheets backend
-  lastSubmitAt?: string; // ISO timestamp of the latest successful step submission
+  dateOfBirth?: string;
+  lastLoginAt?: string;
+  lastSubmitAt?: string;
+}
+
+export interface EmployeeLoginResult {
+  profile: ActiveUser;
+  requiresSetup: boolean;
+  logs?: StepLog[];
+  leaderboard?: LeaderboardData;
+}
+
+export interface AdminSession {
+  authenticated: boolean;
+  displayName: string;
+  allowedBUIds: string[];
 }
 
 export interface WeekConfig {

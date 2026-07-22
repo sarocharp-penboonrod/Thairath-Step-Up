@@ -9,7 +9,6 @@ interface HeaderProps {
   departments: DepartmentInfo[];
   onOpenSettings: () => void;
   onLogout?: () => void;
-  onOpenAdmin: () => void;
 }
 
 export default function Header({
@@ -18,10 +17,9 @@ export default function Header({
   activeUser,
   departments,
   onOpenSettings,
-  onLogout,
-  onOpenAdmin
+  onLogout
 }: HeaderProps) {
-  const userDept = departments.find(d => d.id === activeUser.departmentId);
+  const userDept = departments.find(d => d.id === activeUser.departmentId && d.buId === activeUser.buId);
 
   return (
     <header className="bg-white border-b-2 border-[#edf2f7] sticky top-0 z-40 px-6 py-3 md:py-4 shadow-sm">
@@ -59,7 +57,7 @@ export default function Header({
               </svg>
             </div>
             <div className="hidden xs:block border-l border-slate-200 pl-3">
-              <span className="text-[10px] bg-[#E8F5E9] text-[#00914E] px-2.5 py-1 rounded-md font-extrabold uppercase tracking-widest shadow-2xs border border-emerald-100">
+              <span className="text-xs bg-[#E8F5E9] text-[#00914E] px-2.5 py-1 rounded-md font-extrabold uppercase tracking-widest shadow-2xs border border-emerald-100">
                 CHALLENGE
               </span>
             </div>
@@ -107,18 +105,6 @@ export default function Header({
 
           {/* Setting Trigger & Profile */}
           <div className="flex items-center gap-3">
-            {/* Admin Console Entry */}
-            {activeUser.nickname === 'Admin' && (
-              <button
-                onClick={onOpenAdmin}
-                className="flex items-center gap-1.5 bg-[#E8F5E9] border border-emerald-300 text-[#00914E] hover:bg-[#d4edd9] px-3.5 py-2 rounded-xl font-extrabold text-xs transition-all cursor-pointer shadow-3xs"
-                title="เข้าสู่ระบบผู้ดูแลหลังบ้าน (Admin Console)"
-              >
-                <ShieldCheck className="w-4 h-4 text-[#00914E] animate-pulse" />
-                <span>ระบบหลังบ้าน Admin</span>
-              </button>
-            )}
-
             <button
               onClick={onOpenSettings}
               className="hidden md:flex items-center gap-2 bg-[#F2F4F7] hover:bg-[#e6f5ee] px-3.5 py-2 rounded-xl text-[#344054] hover:text-[#00914E] font-bold text-xs transition-colors cursor-pointer"
@@ -135,8 +121,8 @@ export default function Header({
               </div>
               <div className="text-left hidden xs:block">
                 <p className="font-bold text-xs text-[#000000]">{activeUser.name}</p>
-                <p className="text-[10px] text-[#344054] font-medium leading-none">
-                  {userDept?.nameTh || activeUser.departmentId || 'ไม่ระบุฝ่าย'}
+                <p className="text-xs text-[#344054] font-medium leading-none">
+                  {activeUser.buId || 'ไม่ระบุ BU'} · {userDept?.nameTh || activeUser.departmentId || 'ไม่ระบุฝ่าย'}
                 </p>
               </div>
 

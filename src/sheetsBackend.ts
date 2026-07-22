@@ -1,4 +1,13 @@
-import { ActiveUser, StepLog, DepartmentInfo, NewStepLogInput, VerificationStatus } from './types';
+import {
+  ActiveUser,
+  StepLog,
+  DepartmentInfo,
+  NewStepLogInput,
+  VerificationStatus,
+  EmployeeLoginResult,
+  LeaderboardData,
+  AdminSession
+} from './types';
 import { INITIAL_DEPARTMENTS } from './mockData';
 import { CAMPAIGN_WEEKLY_TARGET } from './campaignConfig';
 
@@ -8,16 +17,12 @@ type ApiEnvelope<T> = {
   error?: string;
 };
 
-type LoginResult = {
-  profile: ActiveUser;
-  requiresSetup: boolean;
-};
-
 const SHEETS_API_URL = import.meta.env.VITE_SHEETS_API_URL || '/api/sheets';
 
 async function sheetsRequest<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(SHEETS_API_URL, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload })
   });
@@ -28,11 +33,11 @@ async function sheetsRequest<T>(action: string, payload: Record<string, unknown>
   try {
     result = JSON.parse(rawText) as ApiEnvelope<T>;
   } catch (_err) {
-    throw new Error(`ไม่สามารถอ่านคำตอบจาก Google Sheets API ได้: ${rawText.slice(0, 140)}`);
+    throw new Error(`ไม่สามารถอ่านคำตอบจากระบบได้: ${rawText.slice(0, 140)}`);
   }
 
   if (!response.ok || !result.ok) {
-    throw new Error(result.error || 'Google Sheets API ทำงานไม่สำเร็จ');
+    throw new Error(result.error || 'ระบบฐานข้อมูลทำงานไม่สำเร็จ');
   }
 
   return result.data as T;
@@ -42,14 +47,24 @@ function normalizeUserKey(userKey: string): string {
   return userKey.trim().toLowerCase();
 }
 
-function withSafeDepartment(profile: ActiveUser): ActiveUser {
+function withSafeProfile(profile: ActiveUser): ActiveUser {
   const departmentId = String(profile.departmentId || '').trim();
+  const buId = String(profile.buId || '').trim();
   return {
     ...profile,
-    departmentId: departmentId || INITIAL_DEPARTMENTS[0]?.id || 'ceo',
+    buId: buId || 'UNASSIGNED',
+    departmentId: departmentId || INITIAL_DEPARTMENTS[0]?.id || 'unassigned',
     weekTarget: CAMPAIGN_WEEKLY_TARGET,
     totalTickets: Number(profile.totalTickets) || 0,
     age: profile.age ? Number(profile.age) : undefined
+  };
+}
+
+function normalizeLeaderboard(data?: LeaderboardData | null): LeaderboardData {
+  return {
+    departments: data?.departments?.length ? data.departments : INITIAL_DEPARTMENTS,
+    businessUnits: data?.businessUnits || [],
+    generatedAt: data?.generatedAt || new Date().toISOString()
   };
 }
 
@@ -57,25 +72,34 @@ export async function seedInitialDataIfNecessary() {
   try {
     await sheetsRequest<{ ready: boolean }>('setup');
   } catch (err) {
-    console.warn('Google Sheets setup check skipped:', err);
+    console.warn('System setup check skipped:', err);
   }
 }
 
-export async function verifyAdminLogin(username: string, password: string): Promise<boolean> {
-  const result = await sheetsRequest<{ authenticated: boolean }>('verifyAdmin', {
+export async function verifyAdminLogin(username: string, password: string): Promise<AdminSession> {
+  return sheetsRequest<AdminSession>('verifyAdmin', {
     username: username.trim(),
     password
   });
-  return Boolean(result.authenticated);
 }
 
-export async function verifyEmployeeLogin(employeeId: string, password: string): Promise<LoginResult> {
-  const result = await sheetsRequest<LoginResult>('verifyLogin', {
+export async function verifyEmployeeLogin(
+  employeeId: string,
+  password: string,
+  currentMonth: number
+): Promise<EmployeeLoginResult> {
+  const result = await sheetsRequest<EmployeeLoginResult>('verifyLogin', {
     employeeId: employeeId.trim(),
-    password: password.trim()
+    password: password.trim(),
+    currentMonth
   });
 
-  return { ...result, profile: withSafeDepartment(result.profile) };
+  return {
+    ...result,
+    profile: withSafeProfile(result.profile),
+    logs: (result.logs || []).sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || '')),
+    leaderboard: normalizeLeaderboard(result.leaderboard)
+  };
 }
 
 export async function getUserProfile(idOrEmail: string): Promise<ActiveUser | null> {
@@ -83,9 +107,9 @@ export async function getUserProfile(idOrEmail: string): Promise<ActiveUser | nu
     const profile = await sheetsRequest<ActiveUser | null>('getUserProfile', {
       idOrEmail: normalizeUserKey(idOrEmail)
     });
-    return profile ? withSafeDepartment(profile) : null;
+    return profile ? withSafeProfile(profile) : null;
   } catch (err) {
-    console.error('Error getting user profile from Google Sheets:', err);
+    console.error('Error getting user profile:', err);
     return null;
   }
 }
@@ -105,7 +129,7 @@ export async function fetchUserLogs(userKey: string): Promise<StepLog[]> {
     });
     return logs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
   } catch (err) {
-    console.error('Error fetching logs from Google Sheets:', err);
+    console.error('Error fetching logs:', err);
     return [];
   }
 }
@@ -124,14 +148,12 @@ export async function saveUserLog(userKey: string, input: NewStepLogInput): Prom
 export async function reviewUserLog(
   logId: string,
   verificationStatus: Extract<VerificationStatus, 'APPROVED' | 'REJECTED'>,
-  reviewNote = '',
-  reviewedBy = 'Admin'
+  reviewNote = ''
 ): Promise<StepLog> {
   return sheetsRequest<StepLog>('reviewUserLog', {
     logId,
     verificationStatus,
-    reviewNote,
-    reviewedBy
+    reviewNote
   });
 }
 
@@ -139,31 +161,37 @@ export async function deleteUserLog(logId: string) {
   await sheetsRequest<{ deleted: boolean }>('deleteUserLog', { logId });
 }
 
-export async function calculateSheetsLeaderboard(currentWeek: number): Promise<DepartmentInfo[]> {
+export async function calculateSheetsLeaderboard(currentMonth: number, forceRefresh = false): Promise<LeaderboardData> {
   try {
-    const leaderboard = await sheetsRequest<DepartmentInfo[]>('calculateLeaderboard', { currentWeek });
-    return leaderboard && leaderboard.length > 0 ? leaderboard : INITIAL_DEPARTMENTS;
+    const leaderboard = await sheetsRequest<LeaderboardData>('calculateLeaderboard', { currentMonth, forceRefresh });
+    return normalizeLeaderboard(leaderboard);
   } catch (err) {
-    console.error('Error fetching dynamic leaderboard data from Google Sheets:', err);
-    return INITIAL_DEPARTMENTS;
+    console.error('Error fetching leaderboard data:', err);
+    return normalizeLeaderboard(null);
   }
+}
+
+export async function adminCreateUserOrUpdateProfile(idOrEmail: string, profile: ActiveUser, passwordText?: string) {
+  await sheetsRequest<{ saved: boolean }>('adminSaveUserProfile', {
+    idOrEmail: normalizeUserKey(profile.employeeId || idOrEmail),
+    profile,
+    password: passwordText
+  });
 }
 
 export async function fetchAllUsers(): Promise<unknown[]> {
-  try {
-    return await sheetsRequest<unknown[]>('fetchAllUsers');
-  } catch (err) {
-    console.error('Error fetching all users for admin from Google Sheets:', err);
-    return [];
-  }
+  return sheetsRequest<unknown[]>('fetchAllUsers');
 }
 
 export async function fetchAllStepLogs(): Promise<unknown[]> {
+  const logs = await sheetsRequest<StepLog[]>('fetchAllStepLogs');
+  return logs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+}
+
+export async function logoutAdmin(): Promise<void> {
   try {
-    const logs = await sheetsRequest<StepLog[]>('fetchAllStepLogs');
-    return logs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+    await sheetsRequest<{ loggedOut: boolean }>('logoutAdmin');
   } catch (err) {
-    console.error('Error fetching all step logs for admin from Google Sheets:', err);
-    return [];
+    console.warn('Admin logout cleanup skipped:', err);
   }
 }

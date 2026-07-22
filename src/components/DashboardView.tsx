@@ -1,27 +1,17 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Activity,
-  Calendar,
+  Award,
   CalendarCheck2,
-  CheckCircle2,
-  Flame,
+  ChevronRight,
+  Clock3,
   Footprints,
   History,
-  Send,
-  Sparkles,
   Target,
-  Ticket,
   TrendingUp
 } from 'lucide-react';
 import { ActiveUser, StepLog, WeekConfig, isVerifiedStatus } from '../types';
-import {
-  CAMPAIGN_MONTHS,
-  CAMPAIGN_WEEKLY_TARGET,
-  getCampaignMonth,
-  getCampaignWeek,
-  getCampaignWeeksThroughMonth,
-  periodKey
-} from '../campaignConfig';
+import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET, getCampaignMonth } from '../campaignConfig';
 
 interface DashboardViewProps {
   activeUser: ActiveUser;
@@ -29,42 +19,12 @@ interface DashboardViewProps {
   currentWeek: number;
   weeks: WeekConfig[];
   setActiveTab: (tab: string) => void;
-  onDeleteLog: (id: string) => void;
   onOpenHistory: () => void;
-  setCurrentWeek: (week: number) => void;
+  setCurrentWeek: (month: number) => void;
 }
 
-interface PeriodSummary {
-  key: string;
-  monthNumber: number;
-  weekNumber: number;
-  steps: number;
-  logs: StepLog[];
-}
-
-function buildPeriodSummaries(logs: StepLog[]): PeriodSummary[] {
-  const grouped = new Map<string, PeriodSummary>();
-
-  logs.forEach((log, index) => {
-    const fallbackWeek = log.weekOfMonth || -(index + 1);
-    const key = periodKey(log.week, fallbackWeek);
-    const existing = grouped.get(key);
-
-    if (existing) {
-      existing.steps += Number(log.steps) || 0;
-      existing.logs.push(log);
-    } else {
-      grouped.set(key, {
-        key,
-        monthNumber: Number(log.week) || 1,
-        weekNumber: fallbackWeek,
-        steps: Number(log.steps) || 0,
-        logs: [log]
-      });
-    }
-  });
-
-  return Array.from(grouped.values());
+function average(values: number[]): number {
+  return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
 }
 
 export default function DashboardView({
@@ -76,320 +36,143 @@ export default function DashboardView({
   setCurrentWeek
 }: DashboardViewProps) {
   const selectedMonth = getCampaignMonth(currentWeek);
-  const weeklyTarget = CAMPAIGN_WEEKLY_TARGET;
-  const verifiedLogs = stepLogs.filter((log) => isVerifiedStatus(log.verificationStatus));
-  const allPeriods = buildPeriodSummaries(verifiedLogs);
-  const selectedPeriods = allPeriods.filter((period) => period.monthNumber === currentWeek);
-  const selectedMonthLogs = stepLogs.filter((log) => Number(log.week) === currentWeek);
-  const pendingMonthLogs = selectedMonthLogs.filter((log) => log.verificationStatus === 'NEEDS_REVIEW').length;
+  const verifiedLogs = useMemo(() => stepLogs.filter((log) => isVerifiedStatus(log.verificationStatus)), [stepLogs]);
+  const selectedVerified = verifiedLogs.filter((log) => Number(log.week) === currentWeek);
+  const selectedAll = stepLogs.filter((log) => Number(log.week) === currentWeek);
+  const cumulativeVerified = verifiedLogs.filter((log) => Number(log.week) <= currentWeek);
 
-  const monthlySteps = selectedPeriods.reduce((sum, period) => sum + period.steps, 0);
-  const monthlyTarget = selectedMonth.weeks.length * weeklyTarget;
-  const monthlyProgress = monthlyTarget > 0 ? Math.min(100, Math.round((monthlySteps / monthlyTarget) * 100)) : 0;
-  const monthlyRemaining = Math.max(0, monthlyTarget - monthlySteps);
-  const submittedWeeks = selectedPeriods.filter((period) => period.weekNumber > 0).length;
-  const completedMonthWeeks = selectedPeriods.filter((period) => period.steps >= weeklyTarget).length;
+  const monthAverage = average(selectedVerified.map((log) => Number(log.steps) || 0));
+  const overallAverage = average(cumulativeVerified.map((log) => Number(log.steps) || 0));
+  const completedWeeks = selectedVerified.filter((log) => Number(log.steps) >= CAMPAIGN_WEEKLY_TARGET).length;
+  const submittedWeeks = new Set(selectedVerified.map((log) => log.weekOfMonth)).size;
+  const successRate = submittedWeeks ? Math.round((completedWeeks / submittedWeeks) * 100) : 0;
+  const pendingCount = selectedAll.filter((log) => log.verificationStatus === 'NEEDS_REVIEW').length;
+  const remainingToTarget = Math.max(0, CAMPAIGN_WEEKLY_TARGET - monthAverage);
+  const peakLog = [...selectedVerified].sort((a, b) => b.steps - a.steps)[0];
 
-  // Overall Journey follows the selected month. A selected month always counts every
-  // configured week in that month, even when the final week has not started yet.
-  // Example: July has four campaign weeks, so the cumulative plan is 4 × 7,000.
-  const cumulativePeriods = allPeriods.filter((period) => period.monthNumber <= currentWeek);
-  const totalSteps = cumulativePeriods.reduce((sum, period) => sum + period.steps, 0);
-  const submittedPeriodKeys = new Set(cumulativePeriods.map((period) => period.key));
-  const plannedPeriods = getCampaignWeeksThroughMonth(currentWeek);
-  const targetWeeksToDate = plannedPeriods.length;
-  const targetToDate = targetWeeksToDate * weeklyTarget;
-  const overallProgress = targetToDate > 0 ? Math.round((totalSteps / targetToDate) * 100) : 0;
-  const completedWeeks = cumulativePeriods.filter((period) => period.steps >= weeklyTarget).length;
-
-  const averageVerifiedWeeklySteps = selectedPeriods.length > 0
-    ? Math.round(monthlySteps / selectedPeriods.length)
-    : 0;
-  const peakPeriod = [...selectedPeriods].sort((a, b) => b.steps - a.steps)[0];
-
-  const healthLevel = averageVerifiedWeeklySteps === 0
-    ? { text: 'รอข้อมูลที่ผ่านการตรวจ', className: 'text-slate-600 bg-slate-50 border-slate-200' }
-    : averageVerifiedWeeklySteps < weeklyTarget
-      ? { text: 'ค่าเฉลี่ยยังต่ำกว่าเป้าหมาย 7,000 ก้าว', className: 'text-amber-700 bg-amber-50 border-amber-100' }
-      : { text: 'ค่าเฉลี่ยถึงเป้าหมาย 7,000 ก้าว', className: 'text-[#00914E] bg-[#E8F5E9] border-emerald-100' };
-
-  const recommendation = averageVerifiedWeeklySteps === 0
-    ? 'ส่งยอดพร้อมหลักฐานและรอการตรวจ ระบบจะนำเฉพาะ AUTO_VERIFIED หรือ APPROVED มาคำนวณ'
-    : averageVerifiedWeeklySteps < weeklyTarget
-      ? `เพิ่มอีกเฉลี่ย ${(weeklyTarget - averageVerifiedWeeklySteps).toLocaleString()} ก้าวต่อสัปดาห์เพื่อถึงเป้าหมาย โดยระบบเทียบยอดรายสัปดาห์กับ 7,000 โดยตรง`
-      : 'รักษาความสม่ำเสมอในแต่ละสัปดาห์ โดยคูปองจะเกิดขึ้นเฉพาะรายการที่ผ่านตรวจและมียอดอย่างน้อย 7,000 ก้าว';
-
-  const journeyCards = [
+  const cards = [
     {
-      label: 'ก้าวสะสมถึงเดือนที่เลือก',
-      value: totalSteps.toLocaleString(),
-      suffix: 'ก้าว',
-      helper: `จาก ${submittedPeriodKeys.size} สัปดาห์ที่ส่งผล`,
+      label: 'ค่าเฉลี่ยเดือนที่เลือก',
+      value: monthAverage.toLocaleString(),
+      suffix: 'ก้าว/วัน',
+      helper: selectedVerified.length ? `จาก ${submittedWeeks} สัปดาห์ที่ผ่านตรวจ` : 'รอข้อมูลที่ผ่านการตรวจ',
       icon: Footprints,
-      iconClass: 'bg-emerald-50 text-[#00914E]'
+      className: 'bg-emerald-50 text-[#00914E]'
     },
     {
-      label: 'เป้าหมายสะสมตามแผน',
-      value: targetToDate.toLocaleString(),
-      suffix: 'ก้าว',
-      helper: `${targetWeeksToDate} สัปดาห์ × ${weeklyTarget.toLocaleString()} ก้าว`,
-      icon: Target,
-      iconClass: 'bg-blue-50 text-blue-600'
-    },
-    {
-      label: 'ความสำเร็จภาพรวม',
-      value: `${overallProgress}`,
-      suffix: '%',
-      helper: totalSteps >= targetToDate ? 'ทำได้ตามเป้าหมายสะสมแล้ว' : `เหลือ ${(targetToDate - totalSteps).toLocaleString()} ก้าว`,
-      icon: TrendingUp,
-      iconClass: 'bg-amber-50 text-amber-600'
-    },
-    {
-      label: 'สัปดาห์ที่ทำสำเร็จ',
-      value: `${completedWeeks}`,
+      label: 'สัปดาห์ที่ถึงเป้าหมาย',
+      value: String(completedWeeks),
       suffix: 'สัปดาห์',
-      helper: `จาก ${submittedPeriodKeys.size} สัปดาห์ที่ส่งผล`,
+      helper: `Success Rate ${successRate}%`,
       icon: CalendarCheck2,
-      iconClass: 'bg-violet-50 text-violet-600'
+      className: 'bg-blue-50 text-blue-600'
+    },
+    {
+      label: 'คูปองสะสม',
+      value: String(activeUser.totalTickets || 0),
+      suffix: 'ใบ',
+      helper: 'เฉพาะรายการ ≥ 7,000 และผ่านตรวจ',
+      icon: Award,
+      className: 'bg-amber-50 text-amber-600'
+    },
+    {
+      label: 'รายการรอตรวจ',
+      value: String(pendingCount),
+      suffix: 'รายการ',
+      helper: pendingCount ? 'ยังไม่ถูกนำไปคำนวณ' : 'ไม่มีรายการค้างตรวจ',
+      icon: Clock3,
+      className: 'bg-violet-50 text-violet-600'
     }
   ];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-5 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
-        <div className="space-y-2">
-          <div className="h-10 select-none" aria-label="Thairath Health Up">
-            <svg viewBox="0 0 160 55" className="h-full w-auto" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <text x="0" y="20" fill="#00914E" style={{ fontSize: '20px', fontWeight: '900', fontFamily: 'Prompt, sans-serif', letterSpacing: '0.04em' }}>THAIRATH</text>
-              <text x="0" y="44" fill="#000000" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '800', fontSize: '15px' }}>HEALTH</text>
-              <text x="88" y="44" fill="#00914E" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '900', fontSize: '15px' }}>Up!</text>
-              <path d="M 2 52 L 72 52 L 76 48 L 79 56 L 84 32 L 89 64 L 94 52 L 97 48 L 100 52 L 150 52" stroke="#00914E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <h2 id="dashboard-title" className="text-lg md:text-xl font-black text-black tracking-tight">
-            ยินดีต้อนรับสู่ THAIRATH STEP UP
-          </h2>
-          <p className="text-xs md:text-sm text-[#475467] font-medium">
-            ดูเป้าหมายสะสมตามแผน พร้อมติดตามผลงานรายเดือนและรายสัปดาห์ของคุณ
-          </p>
+      <section className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-bold text-[#00914E]">สวัสดี {activeUser.nickname || activeUser.name}</p>
+          <h1 className="text-2xl md:text-3xl font-black text-black mt-1">ภาพรวมค่าเฉลี่ยก้าว</h1>
+          <p className="text-sm text-slate-500 mt-2">เป้าหมายคือค่าเฉลี่ยอย่างน้อย 7,000 ก้าวต่อวันในแต่ละสัปดาห์</p>
         </div>
-
-        <div className="flex items-center gap-2 bg-[#E8F5E9] px-4 py-2.5 rounded-xl text-[#00914E] border border-emerald-100 self-start md:self-auto">
-          <Calendar className="w-5 h-5 shrink-0" />
-          <label htmlFor="dashboard-month" className="sr-only">เลือกเดือนที่ต้องการดู</label>
-          <select
-            id="dashboard-month"
-            value={currentWeek}
-            onChange={(event) => setCurrentWeek(Number(event.target.value))}
-            className="bg-transparent border-none py-0.5 pl-1 pr-2 text-sm font-black text-[#00914E] outline-none cursor-pointer"
-          >
-            {CAMPAIGN_MONTHS.map((month) => (
-              <option key={month.number} value={month.number}>{month.label}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <section aria-labelledby="overall-journey-title" className="space-y-3">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#00914E]">Overall Journey</p>
-            <h3 id="overall-journey-title" className="text-base md:text-lg font-black text-black">ภาพรวมสะสมทั้งโครงการ</h3>
-          </div>
-          <p className="hidden md:block text-xs text-slate-500 font-medium">คำนวณตามสัปดาห์ทั้งหมดจนถึงเดือนที่เลือก</p>
-        </div>
-
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
-          {journeyCards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <article key={card.label} className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-xs min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-[10px] md:text-xs font-extrabold text-slate-500 leading-relaxed">{card.label}</p>
-                  <div className={`p-2 rounded-xl shrink-0 ${card.iconClass}`}><Icon className="w-4 h-4" /></div>
-                </div>
-                <div className="mt-3 flex flex-wrap items-baseline gap-x-1.5">
-                  <span className="text-xl md:text-3xl font-black text-black tabular-nums break-all">{card.value}</span>
-                  <span className="text-[10px] md:text-xs font-bold text-slate-500">{card.suffix}</span>
-                </div>
-                <p className="text-[9px] md:text-[10px] text-slate-400 font-semibold mt-1.5 leading-relaxed">{card.helper}</p>
-              </article>
-            );
-          })}
-        </div>
+        <select
+          value={currentWeek}
+          onChange={(event) => setCurrentWeek(Number(event.target.value))}
+          className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-700"
+        >
+          {CAMPAIGN_MONTHS.map((month) => <option key={month.number} value={month.number}>{month.label}</option>)}
+        </select>
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 bg-white rounded-2xl p-6 md:p-8 border border-slate-200 shadow-xs flex flex-col justify-between">
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {cards.map((card) => (
+          <article key={card.label} className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${card.className}`}><card.icon className="w-5 h-5" /></div>
+            <p className="text-xs text-slate-500 font-bold mt-4">{card.label}</p>
+            <p className="text-2xl md:text-3xl font-black text-black mt-1">{card.value}<span className="text-xs ml-1 text-slate-500">{card.suffix}</span></p>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">{card.helper}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <article className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 md:p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black text-black">ผลเดือน{selectedMonth.label}</h2>
+              <p className="text-sm text-slate-500 mt-1">ระบบใช้ค่าเฉลี่ยของแต่ละสัปดาห์ ไม่ได้นำค่าเฉลี่ยมาบวกเป็นก้าวสะสม</p>
+            </div>
+            <Activity className="w-6 h-6 text-[#00914E]" />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Metric label="ค่าเฉลี่ยเดือนนี้" value={`${monthAverage.toLocaleString()} ก้าว/วัน`} />
+            <Metric label="ค่าเฉลี่ยถึงเดือนนี้" value={`${overallAverage.toLocaleString()} ก้าว/วัน`} />
+            <Metric label="สัปดาห์สูงสุด" value={peakLog ? `${Number(peakLog.steps).toLocaleString()} ก้าว/วัน` : '-'} />
+          </div>
+
+          <div className="mt-6">
+            <div className="flex justify-between text-sm font-bold">
+              <span>เป้าหมายเฉลี่ยต่อวัน</span>
+              <span>{monthAverage.toLocaleString()} / {CAMPAIGN_WEEKLY_TARGET.toLocaleString()}</span>
+            </div>
+            <div className="h-3 bg-slate-100 rounded-full mt-3 overflow-hidden">
+              <div className="h-full bg-[#00914E] rounded-full transition-all" style={{ width: `${Math.min(100, Math.round(monthAverage / CAMPAIGN_WEEKLY_TARGET * 100))}%` }} />
+            </div>
+            <p className="text-sm text-slate-500 mt-3">
+              {monthAverage >= CAMPAIGN_WEEKLY_TARGET
+                ? 'ยอดเฉลี่ยถึงเป้าหมายแล้ว รักษาความสม่ำเสมอในสัปดาห์ถัดไป'
+                : monthAverage > 0
+                  ? `เพิ่มอีกเฉลี่ย ${remainingToTarget.toLocaleString()} ก้าว/วัน เพื่อถึงเป้าหมาย`
+                  : 'ส่งค่าเฉลี่ยก้าวพร้อมหลักฐานเพื่อเริ่มติดตามผล'}
+            </p>
+          </div>
+        </article>
+
+        <article className="bg-black text-white rounded-2xl p-5 md:p-6 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-              <div>
-                <p className="text-[#00914E] font-extrabold text-[11px] uppercase tracking-wider">Monthly Performance</p>
-                <h3 className="text-base font-black text-black">ผลงานเดือน{selectedMonth.label}</h3>
-              </div>
-              <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-[#E8F5E9] text-[#008148] border border-emerald-100 self-start">
-                เป้าหมายเดือน: {monthlyTarget.toLocaleString()} ก้าว
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-baseline gap-3 mt-2">
-              <span className="text-5xl md:text-7xl font-black text-[#008148] tracking-tighter tabular-nums">{monthlySteps.toLocaleString()}</span>
-              <span className="text-sm md:text-base text-[#475467] font-semibold">/ {monthlyTarget.toLocaleString()} ก้าว</span>
-            </div>
-
-            <div className="w-full bg-[#F2F4F7] h-4 rounded-full mt-6 overflow-hidden relative shadow-inner" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={monthlyProgress}>
-              <div className="bg-gradient-to-r from-[#008148] to-[#00b162] h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${monthlyProgress}%` }} />
-            </div>
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-4 text-xs md:text-sm">
-              <span className="font-extrabold text-[#344054]">ความสำเร็จของเดือน: {monthlyProgress}%</span>
-              {monthlySteps >= monthlyTarget ? (
-                <span className="text-[#008148] font-bold flex items-center gap-1.5 bg-[#E8F5E9] px-3 py-1.5 rounded-lg">
-                  <CheckCircle2 className="w-4 h-4" /> ทำครบเป้าหมายของเดือนแล้ว
-                </span>
-              ) : (
-                <span className="text-[#008148] font-bold flex items-center gap-1.5 bg-[#E8F5E9] px-3 py-1.5 rounded-lg">
-                  <Flame className="w-4 h-4 text-amber-500" /> เหลือ {monthlyRemaining.toLocaleString()} ก้าวถึงเป้าหมายเดือน
-                </span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6">
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                <p className="text-[10px] font-bold text-slate-400">ส่งผลแล้ว</p>
-                <p className="text-base font-black text-black mt-1">{submittedWeeks}/{selectedMonth.weeks.length} สัปดาห์</p>
-              </div>
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                <p className="text-[10px] font-bold text-slate-400">ทำถึงเป้า</p>
-                <p className="text-base font-black text-black mt-1">{completedMonthWeeks} สัปดาห์</p>
-              </div>
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 col-span-2 sm:col-span-1">
-                <p className="text-[10px] font-bold text-slate-400">เฉลี่ยรายการที่ผ่านตรวจ</p>
-                <p className="text-base font-black text-black mt-1">{averageVerifiedWeeklySteps.toLocaleString()} ก้าว/สัปดาห์</p>
-              </div>
-            </div>
+            <Target className="w-7 h-7 text-emerald-400" />
+            <h2 className="text-xl font-black mt-4">กติกาคูปอง</h2>
+            <p className="text-sm text-slate-300 leading-relaxed mt-3">
+              ได้รับ 1 คูปอง เมื่อค่าเฉลี่ยของสัปดาห์นั้นตั้งแต่ 7,000 ก้าว/วันขึ้นไป และหลักฐานผ่านการตรวจแล้วเท่านั้น
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed mt-3">รายการรอตรวจหรือไม่ผ่านการตรวจ จะยังไม่ถูกนำมาคำนวณ Dashboard, Leaderboard และคูปอง</p>
           </div>
+          <button onClick={() => setActiveTab('submission')} className="mt-6 w-full bg-[#00914E] hover:bg-[#00703c] py-3 rounded-xl text-sm font-black flex items-center justify-center gap-2 cursor-pointer">
+            ส่งผลค่าเฉลี่ยก้าว <ChevronRight className="w-4 h-4" />
+          </button>
+        </article>
+      </section>
 
-          <div className="mt-7 pt-5 border-t border-slate-100 flex flex-wrap gap-3">
-            <button onClick={() => setActiveTab('submission')} className="btn bg-[#008148] hover:bg-[#005a32] text-white grow md:grow-0 text-sm font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95">
-              <span>ส่งผลก้าวประจำสัปดาห์</span><Send className="w-4 h-4" />
-            </button>
-            <button onClick={onOpenHistory} className="btn bg-[#F2F4F7] hover:bg-gray-200 text-black font-bold grow md:grow-0 text-sm py-3 px-6 rounded-xl flex items-center justify-center gap-2 cursor-pointer">
-              <span>ดูประวัติการส่งผล</span><History className="w-4 h-4 text-[#344054]" />
-            </button>
-          </div>
-        </section>
-
-        <section className="bg-gradient-to-br from-[#008148] to-[#005a32] rounded-2xl p-6 md:p-8 text-white flex flex-col justify-between shadow-md relative overflow-hidden border border-[#005a32]/20">
-          <div className="absolute -right-12 -bottom-12 w-40 h-40 bg-gradient-to-tr from-white/10 to-[#FFCC00]/20 rounded-full blur-xl pointer-events-none" />
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 text-emerald-100">
-              <Ticket className="w-5 h-5 text-[#FFCC00]" />
-              <p className="text-xs md:text-sm font-extrabold uppercase tracking-wider">Lucky Draw</p>
-            </div>
-            <p className="text-xs text-emerald-100 mt-2">สิทธิ์จับรางวัลสะสมทั้งหมด</p>
-            <div className="flex items-end gap-3 mt-5">
-              <span className="text-6xl md:text-8xl font-black tracking-tight leading-none text-[#FFCC00] tabular-nums">{String(activeUser.totalTickets).padStart(2, '0')}</span>
-              <span className="text-sm font-bold text-emerald-100 pb-2">ใบ</span>
-            </div>
-          </div>
-
-          <div className="relative z-10 mt-8 pt-5 border-t border-white/10 space-y-3">
-            <div className="flex items-center justify-between bg-white/10 px-4 py-3 rounded-xl border border-white/5">
-              <div className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-[#FFCC00]" /><span className="text-xs font-bold text-emerald-100">เดือนนี้ทำถึงเป้า</span></div>
-              <span className="font-black text-lg text-[#FFCC00]">{completedMonthWeeks} สัปดาห์</span>
-            </div>
-            <p className="text-[10px] text-emerald-100/80 leading-relaxed">คูปองนับจากรายการ AUTO_VERIFIED หรือ APPROVED ที่มียอดอย่างน้อย 7,000 ก้าวเท่านั้น</p>
-          </div>
-        </section>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <button onClick={onOpenHistory} className="lg:col-span-2 text-left bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-md transition-shadow cursor-pointer block group">
-          <div className="flex justify-between items-center mb-4 gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-[#008148]" />
-              <h3 className="font-extrabold text-black text-base">รายการส่งผลเดือนนี้ ({selectedMonthLogs.length} รายการ){pendingMonthLogs > 0 ? ` · รอตรวจ ${pendingMonthLogs}` : ''}</h3>
-            </div>
-            <span className="text-xs font-bold text-[#008148] group-hover:underline shrink-0">ดูทั้งหมด →</span>
-          </div>
-
-          {selectedMonthLogs.length === 0 ? (
-            <div className="py-8 text-center text-[#475467] text-sm">
-              <p>ยังไม่มีการส่งผลสำหรับเดือนนี้</p>
-              <span className="text-xs text-gray-400 mt-1 block">เลือก “ส่งผลก้าวประจำสัปดาห์” เพื่อเริ่มบันทึกข้อมูล</span>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[620px]">
-                <thead>
-                  <tr className="border-b border-gray-100 text-[#475467] font-bold text-xs">
-                    <th className="py-2.5 text-left">รอบที่ส่ง</th>
-                    <th className="py-2.5 text-left">ช่วงวันที่</th>
-                    <th className="py-2.5 text-right">จำนวนก้าว</th>
-                    <th className="py-2.5 text-center">สถานะ</th>
-                    <th className="py-2.5 text-right">เวลาที่ส่ง</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {selectedMonthLogs.slice(0, 5).map((log) => {
-                    const week = getCampaignWeek(log.week, log.weekOfMonth);
-                    return (
-                      <tr key={log.id} className="text-[#344054] hover:bg-gray-50 transition-colors">
-                        <td className="py-3 font-extrabold text-[#008148]">{week?.label || `รายการเดิม`}</td>
-                        <td className="py-3 font-semibold">{week?.range || new Date(log.date).toLocaleDateString('th-TH')}</td>
-                        <td className="py-3 text-right font-black text-black tabular-nums">{log.steps.toLocaleString()}</td>
-                        <td className="py-3 text-center"><span className={`px-2 py-1 rounded-full text-[9px] font-extrabold ${isVerifiedStatus(log.verificationStatus) ? 'bg-emerald-50 text-emerald-700' : log.verificationStatus === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>{isVerifiedStatus(log.verificationStatus) ? 'ผ่านตรวจ' : log.verificationStatus === 'REJECTED' ? 'ไม่ผ่าน' : 'รอตรวจ'}</span></td>
-                        <td className="py-3 text-right text-xs text-gray-400">{new Date(log.submittedAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </button>
-
-        <section className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col justify-between shadow-xs">
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Activity className="w-5 h-5 text-[#00914E]" />
-              <h3 className="font-extrabold text-black text-base">Health Insight</h3>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex justify-between items-center p-3 rounded-xl bg-[#F2F4F7] gap-3">
-                <span className="text-xs font-bold text-[#475467]">เฉลี่ยต่อสัปดาห์ที่ผ่านตรวจ</span>
-                <span className="text-sm font-extrabold text-black text-right">{averageVerifiedWeeklySteps.toLocaleString()} ก้าว</span>
-              </div>
-              <div className="flex justify-between items-center p-3 rounded-xl bg-[#F2F4F7] gap-3">
-                <span className="text-xs font-bold text-[#475467]">รายการรอตรวจเดือนนี้</span>
-                <span className="text-xs font-extrabold text-amber-700 text-right">{pendingMonthLogs} รายการ</span>
-              </div>
-              <div className="flex justify-between items-center p-3 rounded-xl bg-[#F2F4F7] gap-3">
-                <span className="text-xs font-bold text-[#475467]">เป้าหมายที่ใช้คำนวณ</span>
-                <span className="text-xs font-extrabold text-black text-right">7,000 ก้าว/สัปดาห์</span>
-              </div>
-              <div className={`p-3 rounded-xl text-center border font-bold text-xs ${healthLevel.className}`}>
-                {healthLevel.text}
-              </div>
-              <div className="p-3.5 rounded-xl bg-[#E8F5E9]/50 border border-emerald-100 text-xs text-[#344054] leading-relaxed">
-                <span className="font-extrabold text-black block mb-1">คำแนะนำทั่วไป</span>{recommendation}
-              </div>
-              {peakPeriod && (
-                <div className="p-3 rounded-xl bg-[#F2F4F7]">
-                  <p className="text-[10px] uppercase font-bold text-[#475467] tracking-wider">สัปดาห์ที่ทำได้สูงสุด</p>
-                  <div className="flex justify-between items-end mt-1 gap-2">
-                    <span className="text-xs font-semibold text-gray-600">{getCampaignWeek(peakPeriod.monthNumber, peakPeriod.weekNumber)?.label || 'ข้อมูลเดิม'}</span>
-                    <span className="text-sm font-black text-black">{peakPeriod.steps.toLocaleString()} ก้าว</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-          <p className="pt-4 border-t border-gray-100 mt-4 text-[10px] text-gray-400 font-medium text-center">ระบบคำนวณจากข้อมูลที่ผ่านตรวจเท่านั้น และไม่หารจำนวนวัน</p>
-        </section>
-      </div>
+      <section className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center"><History className="w-5 h-5 text-slate-600" /></div>
+          <div><p className="font-black text-black">ประวัติการส่งผล</p><p className="text-sm text-slate-500">ดูสถานะหลักฐานและค่าเฉลี่ยของแต่ละสัปดาห์</p></div>
+        </div>
+        <button onClick={onOpenHistory} className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm font-bold cursor-pointer flex items-center gap-2">เปิดประวัติ <TrendingUp className="w-4 h-4" /></button>
+      </section>
     </div>
   );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold">{label}</p><p className="text-lg font-black text-black mt-1">{value}</p></div>;
 }

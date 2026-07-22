@@ -2,8 +2,8 @@ export interface CampaignWeek {
   number: number;
   label: string;
   range: string;
-  startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
+  startDate: string;
+  endDate: string;
 }
 
 export interface CampaignMonth {
@@ -13,7 +13,19 @@ export interface CampaignMonth {
   weeks: CampaignWeek[];
 }
 
+export type SubmissionWindowState = 'NOT_OPEN' | 'OPEN' | 'CLOSING_SOON' | 'CLOSED';
+
+export interface SubmissionWindowStatus {
+  state: SubmissionWindowState;
+  isSelectable: boolean;
+  message: string;
+  closeAt: string;
+  closeLabel: string;
+  daysRemaining: number;
+}
+
 export const CAMPAIGN_WEEKLY_TARGET = 7000;
+export const SUBMISSION_GRACE_DAYS = 21;
 
 export const CAMPAIGN_MONTHS: CampaignMonth[] = [
   {
@@ -125,4 +137,75 @@ export function getDefaultCampaignMonth(asOf = new Date()): number {
 
 export function periodKey(monthNumber: number, weekNumber?: number): string {
   return `${monthNumber}-${weekNumber || 0}`;
+}
+
+export function getSubmissionCloseDate(week: CampaignWeek): Date {
+  const close = new Date(`${week.endDate}T23:59:59+07:00`);
+  close.setTime(close.getTime() + SUBMISSION_GRACE_DAYS * 24 * 60 * 60 * 1000);
+  return close;
+}
+
+export function getSubmissionWindowStatus(
+  monthNumber: number,
+  weekNumber: number,
+  asOf = new Date()
+): SubmissionWindowStatus {
+  const week = getCampaignWeek(monthNumber, weekNumber);
+  if (!week) {
+    return {
+      state: 'CLOSED',
+      isSelectable: false,
+      message: 'ไม่พบช่วงเวลาของสัปดาห์นี้',
+      closeAt: '',
+      closeLabel: '-',
+      daysRemaining: 0
+    };
+  }
+
+  const openAt = new Date(`${week.startDate}T00:00:00+07:00`);
+  const closeAt = getSubmissionCloseDate(week);
+  const closeLabel = closeAt.toLocaleString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+
+  if (asOf.getTime() < openAt.getTime()) {
+    return {
+      state: 'NOT_OPEN',
+      isSelectable: false,
+      message: `ยังไม่ถึงช่วงส่งผล เริ่มส่งได้ตั้งแต่ ${openAt.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'long', year: 'numeric' })}`,
+      closeAt: closeAt.toISOString(),
+      closeLabel,
+      daysRemaining: Math.ceil((closeAt.getTime() - asOf.getTime()) / 86400000)
+    };
+  }
+
+  if (asOf.getTime() > closeAt.getTime()) {
+    return {
+      state: 'CLOSED',
+      isSelectable: false,
+      message: `เกินกำหนดส่งผลแล้ว ปิดรับเมื่อ ${closeLabel}`,
+      closeAt: closeAt.toISOString(),
+      closeLabel,
+      daysRemaining: 0
+    };
+  }
+
+  const daysRemaining = Math.max(0, Math.ceil((closeAt.getTime() - asOf.getTime()) / 86400000));
+  const closingSoon = daysRemaining <= 3;
+  return {
+    state: closingSoon ? 'CLOSING_SOON' : 'OPEN',
+    isSelectable: true,
+    message: closingSoon
+      ? `ใกล้หมดเขต เหลือประมาณ ${daysRemaining} วัน ปิดรับ ${closeLabel}`
+      : `เปิดรับผลถึง ${closeLabel}`,
+    closeAt: closeAt.toISOString(),
+    closeLabel,
+    daysRemaining
+  };
 }

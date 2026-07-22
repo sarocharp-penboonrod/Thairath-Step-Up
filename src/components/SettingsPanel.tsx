@@ -27,7 +27,7 @@ export default function SettingsPanel({
   }, [isOpen, activeUser.nickname]);
 
   const departmentName = useMemo(() => {
-    return departments.find((department) => department.id === activeUser.departmentId)?.nameTh
+    return departments.find((department) => department.id === activeUser.departmentId && department.buId === activeUser.buId)?.nameTh
       || activeUser.departmentId
       || 'ยังไม่ระบุฝ่าย';
   }, [departments, activeUser.departmentId]);
@@ -72,7 +72,7 @@ export default function SettingsPanel({
             <div className="flex items-start gap-2.5">
               <BadgeInfo className="w-5 h-5 text-[#00914E] mt-0.5 shrink-0" />
               <p className="text-xs text-gray-600 leading-relaxed">
-                ข้อมูลชื่อ ฝ่าย และเป้าหมายประจำสัปดาห์อ้างอิงจากฐานข้อมูลพนักงาน เพื่อให้การคำนวณผลและ Leaderboard เป็นมาตรฐานเดียวกัน
+                ข้อมูลชื่อ BU ฝ่าย และเป้าหมายเฉลี่ยอ้างอิงจากฐานข้อมูลพนักงาน เพื่อให้การคำนวณผลและ Leaderboard เป็นมาตรฐานเดียวกัน
               </p>
             </div>
           </div>
@@ -84,6 +84,7 @@ export default function SettingsPanel({
             </h4>
 
             <InfoRow label="รหัสพนักงาน" value={activeUser.employeeId || '-'} />
+            <InfoRow label="BU" value={activeUser.buId || 'ยังไม่ระบุ BU'} />
             <InfoRow label="ชื่อ-นามสกุล" value={activeUser.name || '-'} />
             <InfoRow
               label="ฝ่าย / หน่วยงาน"
@@ -91,8 +92,8 @@ export default function SettingsPanel({
               icon={<Building className="w-3.5 h-3.5 text-emerald-600" />}
             />
             <InfoRow
-              label="เป้าหมายต่อสัปดาห์"
-              value={`${CAMPAIGN_WEEKLY_TARGET.toLocaleString('th-TH')} ก้าว`}
+              label="เป้าหมายเฉลี่ยต่อวัน"
+              value={`${CAMPAIGN_WEEKLY_TARGET.toLocaleString('th-TH')} ก้าว/วัน`}
               icon={<Goal className="w-3.5 h-3.5 text-orange-500" />}
             />
           </section>
@@ -134,7 +135,7 @@ export default function SettingsPanel({
         )}
 
         <div className="p-4 bg-[#F2F4F7] border-t border-gray-100 text-center">
-          <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">
             Thairath Step Up Workspace
           </p>
         </div>

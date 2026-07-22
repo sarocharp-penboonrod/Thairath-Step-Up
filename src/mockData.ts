@@ -4,6 +4,7 @@ import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET } from './campaignConfig';
 export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   {
     id: 'ceo',
+    buId: 'DEMO',
     nameTh: 'สายงาน CEO',
     nameEn: 'CEO Office',
     participationRate: 92,
@@ -13,6 +14,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'creative_digital',
+    buId: 'DEMO',
     nameTh: 'ฝ่าย Creative Digital Studio',
     nameEn: 'Creative Digital Studio',
     participationRate: 85,
@@ -22,6 +24,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'mirror',
+    buId: 'DEMO',
     nameTh: 'ฝ่าย Mirror',
     nameEn: 'Mirror Editorial',
     participationRate: 80,
@@ -31,6 +34,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'prod_tech_prod',
+    buId: 'DEMO',
     nameTh: 'ฝ่าย Product & Technology (Product)',
     nameEn: 'Product & Tech (Product)',
     participationRate: 88,
@@ -40,6 +44,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'prod_tech_tech',
+    buId: 'DEMO',
     nameTh: 'ฝ่าย Product & Technology (Tech)',
     nameEn: 'Product & Tech (Tech)',
     participationRate: 90,
@@ -49,6 +54,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'tr_creative',
+    buId: 'DEMO',
     nameTh: 'ฝ่าย Thairath Creative',
     nameEn: 'Thairath Creative',
     participationRate: 84,
@@ -58,6 +64,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'tr_money',
+    buId: 'DEMO',
     nameTh: 'ฝ่าย Thairath Money',
     nameEn: 'Thairath Money',
     participationRate: 86,
@@ -67,6 +74,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'marketing',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายการตลาด',
     nameEn: 'Marketing Department',
     participationRate: 78,
@@ -76,6 +84,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'event',
+    buId: 'DEMO',
     nameTh: 'ฝ่าย Event',
     nameEn: 'Event Department',
     participationRate: 82,
@@ -85,6 +94,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'editorial_online',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายบรรณาธิการออนไลน์',
     nameEn: 'Online Editorial',
     participationRate: 89,
@@ -94,6 +104,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'business_dev',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายพัฒนาธุรกิจ',
     nameEn: 'Business Development',
     participationRate: 75,
@@ -103,6 +114,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'thairath_plus',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายไทยรัฐพลัส',
     nameEn: 'Thairath Plus',
     participationRate: 81,
@@ -112,6 +124,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'sales_private_1',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายขายเอกชน 1',
     nameEn: 'Enterprise Sales 1',
     participationRate: 77,
@@ -121,6 +134,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'sales_private_2',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายขายเอกชน 2',
     nameEn: 'Enterprise Sales 2',
     participationRate: 79,
@@ -130,6 +144,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'sales_private_3',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายขายเอกชน 3',
     nameEn: 'Enterprise Sales 3',
     participationRate: 74,
@@ -139,6 +154,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'sales_operation',
+    buId: 'DEMO',
     nameTh: 'ส่วนงาน Sales Operation',
     nameEn: 'Sales Operations Group',
     participationRate: 83,
@@ -148,6 +164,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'safety_she',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายความปลอดภัยอาชีวอนามัยและสภาพแวดล้อมในการทำงาน',
     nameEn: 'Safety & SHE Department',
     participationRate: 94,
@@ -157,6 +174,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
   },
   {
     id: 'sales_gov',
+    buId: 'DEMO',
     nameTh: 'ฝ่ายขายราชการ',
     nameEn: 'Government Sales',
     participationRate: 76,
@@ -169,6 +187,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
 export const INITIAL_USER: ActiveUser = {
   name: 'คุณวรพงษ์ (เบ)',
   nickname: 'เบ',
+  buId: 'DEMO',
   departmentId: 'prod_tech_tech',
   weekTarget: CAMPAIGN_WEEKLY_TARGET,
   totalTickets: 5

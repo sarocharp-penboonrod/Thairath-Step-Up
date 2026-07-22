@@ -1,406 +1,213 @@
 import React, { useState } from 'react';
-import { Lock, User, Building2, ArrowRight, Eye, EyeOff, ShieldCheck } from 'lucide-react';
-import { ActiveUser, DepartmentInfo } from '../types';
-import { 
-  verifyEmployeeLogin,
-  verifyAdminLogin,
-  createUserOrUpdateProfile
-} from '../sheetsBackend';
+import { Lock, User, ArrowRight, Eye, EyeOff, ShieldCheck, Building2 } from 'lucide-react';
+import { ActiveUser, DepartmentInfo, EmployeeLoginResult } from '../types';
+import { verifyEmployeeLogin, verifyAdminLogin, createUserOrUpdateProfile } from '../sheetsBackend';
 import { CAMPAIGN_WEEKLY_TARGET } from '../campaignConfig';
 
 interface LoginViewProps {
   departments: DepartmentInfo[];
-  onLoginSuccess: (user: ActiveUser) => void;
+  currentMonth: number;
+  onLoginSuccess: (user: ActiveUser, bootstrap?: EmployeeLoginResult) => void;
 }
 
-export default function LoginView({ departments, onLoginSuccess }: LoginViewProps) {
+export default function LoginView({ currentMonth, onLoginSuccess }: LoginViewProps) {
   const [loading, setLoading] = useState(false);
   const [isAdminLogin, setIsAdminLogin] = useState(false);
-  
-  // Login Form States (6-digit ID and Birthdate)
   const [employeeId, setEmployeeId] = useState('');
   const [password, setPassword] = useState('');
   const [signinError, setSigninError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-
-  // First-time profile setup after employee ID + birthdate are verified in Google Sheets
   const [firstTimeSetupActive, setFirstTimeSetupActive] = useState(false);
-  const [pendingProfile, setPendingProfile] = useState<ActiveUser | null>(null);
+  const [pendingResult, setPendingResult] = useState<EmployeeLoginResult | null>(null);
   const [newNickname, setNewNickname] = useState('');
-  const [newDept, setNewDept] = useState(departments[0]?.id || 'ceo');
   const [newUserError, setNewUserError] = useState('');
 
-  const handleSignInSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSignInSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setSigninError('');
     setFirstTimeSetupActive(false);
-    
     const cleanId = employeeId.trim();
     const cleanPassword = password.trim();
 
     if (isAdminLogin) {
-      if (!cleanId) {
-        setSigninError('กรุณากรอกรหัสแอดมินหรือบัญชีผู้ดูแลระบบ');
-        return;
-      }
-      if (!cleanPassword) {
-        setSigninError('กรุณากรอกรหัสผ่านสำหรับแอดมิน');
-        return;
-      }
-
+      if (!cleanId || !cleanPassword) return setSigninError('กรุณากรอกชื่อบัญชีและรหัสผ่าน Admin');
       setLoading(true);
       try {
-        const authenticated = await verifyAdminLogin(cleanId, cleanPassword);
-        if (!authenticated) {
-          setSigninError('ชื่อผู้ใช้หรือรหัสผ่าน Admin ไม่ถูกต้อง');
-          return;
-        }
-
+        const session = await verifyAdminLogin(cleanId, cleanPassword);
         onLoginSuccess({
           employeeId: 'ADMIN',
           email: 'admin@thairathgroup.com',
-          name: 'ผู้ดูแลระบบ Thairath Step Up',
+          name: session.displayName || 'ผู้ดูแลระบบ Thairath Step Up',
           nickname: 'Admin',
+          buId: session.allowedBUIds.includes('ALL') ? 'ALL' : session.allowedBUIds[0] || 'ALL',
           departmentId: 'admin',
           weekTarget: CAMPAIGN_WEEKLY_TARGET,
           totalTickets: 0
         });
-      } catch (err: any) {
-        setSigninError(err.message || 'เกิดข้อผิดพลาดในการตรวจสอบสิทธิ์ Admin');
+      } catch (error: any) {
+        setSigninError(error.message || 'เกิดข้อผิดพลาดในการตรวจสอบสิทธิ์ Admin');
       } finally {
         setLoading(false);
       }
       return;
     }
 
-    if (cleanId.length !== 6 || !/^\d+$/.test(cleanId)) {
-      setSigninError('กรุณากรอกรหัสพนักงานเป็นตัวเลข 6 หลัก');
-      return;
-    }
-    
-    if (cleanPassword.length !== 6 || !/^\d+$/.test(cleanPassword)) {
-      setSigninError('กรุณากรอกรหัสผ่านวันเดือนปีเกิดเป็นตัวเลข 6 หลัก (เช่น 120342)');
-      return;
-    }
+    if (!/^\d{6}$/.test(cleanId)) return setSigninError('กรุณากรอกรหัสพนักงานเป็นตัวเลข 6 หลัก');
+    if (!/^\d{6}$/.test(cleanPassword)) return setSigninError('กรุณากรอกรหัสผ่านวันเดือนปีเกิด 6 หลัก พ.ศ.');
 
     setLoading(true);
     try {
-      // Verify against Google Sheets employee database before entering the app.
-      const loginResult = await verifyEmployeeLogin(cleanId, cleanPassword);
-      const profile = {
-        ...loginResult.profile,
+      // Login returns only this employee's profile/logs plus compact leaderboard data in one request.
+      const result = await verifyEmployeeLogin(cleanId, cleanPassword, currentMonth);
+      const profile: ActiveUser = {
+        ...result.profile,
         employeeId: cleanId,
-        email: loginResult.profile.email || `${cleanId}@thairathgroup.com`
+        email: result.profile.email || `${cleanId}@thairathgroup.com`
       };
-
-      if (loginResult.requiresSetup) {
-        setPendingProfile(profile);
+      if (result.requiresSetup) {
+        setPendingResult({ ...result, profile });
         setNewNickname(profile.nickname || '');
-        setNewDept(profile.departmentId || departments[0]?.id || 'ceo');
         setFirstTimeSetupActive(true);
-        setLoading(false);
         return;
       }
-
-      onLoginSuccess(profile);
-
-    } catch (err: any) {
-      console.error(err);
-      setSigninError(err.message || 'เกิดข้อผิดพลาดจากเครือข่ายฐานข้อมูล Google Sheets');
+      onLoginSuccess(profile, { ...result, profile });
+    } catch (error: any) {
+      setSigninError(error.message || 'เกิดข้อผิดพลาดจากระบบฐานข้อมูล');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleFirstTimeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleFirstTimeSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setNewUserError('');
-
-    const cleanId = employeeId.trim();
-    const cleanPassword = password.trim();
-
-    if (!newNickname.trim()) {
-      setNewUserError('กรุณากรอกชื่อเล่นเพื่อแสดงในระบบบอร์ด');
-      return;
-    }
+    if (!newNickname.trim()) return setNewUserError('กรุณากรอกชื่อเล่นเพื่อแสดงในระบบ');
+    if (!pendingResult) return setNewUserError('ไม่พบข้อมูลยืนยันตัวตน กรุณาเข้าสู่ระบบใหม่');
 
     setLoading(true);
     try {
-      const displayNickname = newNickname.trim();
       const newUser: ActiveUser = {
-        ...(pendingProfile || ({} as ActiveUser)),
-        name: pendingProfile?.name || `คุณ${displayNickname}`,
-        nickname: displayNickname,
-        departmentId: newDept,
-        weekTarget: CAMPAIGN_WEEKLY_TARGET,
-        totalTickets: pendingProfile?.totalTickets ?? 2,
-        email: pendingProfile?.email || `${cleanId}@thairathgroup.com`,
-        employeeId: cleanId,
-        age: pendingProfile?.age,
-        dateOfBirth: pendingProfile?.dateOfBirth
+        ...pendingResult.profile,
+        nickname: newNickname.trim(),
+        weekTarget: CAMPAIGN_WEEKLY_TARGET
       };
-
-      // Save first-time profile setup to Google Sheets. Age is calculated from birthdate in the employee database.
-      await createUserOrUpdateProfile(cleanId, newUser, cleanPassword);
-      onLoginSuccess(newUser);
-    } catch (err: any) {
-      console.error(err);
-      setNewUserError('เกิดปัญหาในการบันทึกโปรไฟล์พนักงาน: ' + err.message);
+      await createUserOrUpdateProfile(newUser.employeeId || '', newUser, password.trim());
+      onLoginSuccess(newUser, { ...pendingResult, profile: newUser, requiresSetup: false });
+    } catch (error: any) {
+      setNewUserError(`เกิดปัญหาในการบันทึกโปรไฟล์: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8 font-sans relative">
-      
-      {/* Admin Center Button inside Top-Right Corner */}
-      <div className="absolute top-4 right-4 z-25 md:top-6 md:right-8">
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-between py-10 px-4 sm:px-6 lg:px-8 font-sans relative">
+      <div className="absolute top-4 right-4 z-20 md:top-6 md:right-8">
         <button
           type="button"
-          onClick={() => {
-            setIsAdminLogin(!isAdminLogin);
-            setSigninError('');
-            setFirstTimeSetupActive(false);
-          }}
-          className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs border transition-transform active:scale-95 ${
-            isAdminLogin
-              ? 'bg-[#00914E] text-white border-[#00914E] hover:bg-[#00703c]'
-              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-black hover:border-slate-300'
-          }`}
+          onClick={() => { setIsAdminLogin((value) => !value); setSigninError(''); setFirstTimeSetupActive(false); }}
+          className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 cursor-pointer shadow-sm border ${isAdminLogin ? 'bg-[#00914E] text-white border-[#00914E]' : 'bg-white text-slate-700 border-slate-200'}`}
         >
           <ShieldCheck className="w-4 h-4" />
-          <span>{isAdminLogin ? '👤 สำหรับพนักงาน (Employee Center)' : '🔑 Admin Center'}</span>
+          {isAdminLogin ? 'สำหรับพนักงาน' : 'Admin Center'}
         </button>
       </div>
-      
-      {/* Spacer Header / Logo container rendering Thairath Health Up vector logo */}
-      <div className="mt-4 sm:mx-auto sm:w-full sm:max-w-md text-center">
-        
-        {/* THAIRATH HEALTH Up! Direct animated SVG with transparent background */}
-        <div className="mb-4 max-w-[290px] mx-auto select-none">
-          <svg viewBox="0 0 350 135" className="w-full h-auto filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.01)]" fill="none" xmlns="http://www.w3.org/2000/svg">
-            {/* THAIRATH Green Text */}
-            <text x="50%" y="44" textAnchor="middle" fill="#00914E" style={{ fontSize: '38px', fontWeight: '900', fontFamily: 'Prompt, sans-serif', letterSpacing: '0.04em' }}>
-              THAIRATH
-            </text>
-            
-            {/* HEALTH Wordmark on Left */}
-            <text x="68" y="80" fill="#000000" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '800', fontSize: '28px' }} letterSpacing="0.01em">
-              HEALTH
-            </text>
 
-            {/* Up! Wordmark on Right */}
-            <text x="208" y="80" fill="#00914E" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '900', fontSize: '28px' }} letterSpacing="0.01em">
-              Up!
-            </text>
-
-            {/* Glowing heartbeat ECG background guide line (static faint mint-silver) */}
-            <path 
-              d="M 38 102 L 162 102 L 170 94 L 176 110 L 186 58 L 197 132 L 208 102 L 215 92 L 221 102 L 312 102" 
-              stroke="#E8F5E9" 
-              strokeWidth="4" 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              opacity="0.6"
-            />
-
-            {/* Pulsating heartbeat ECG line extending as an underline and spike under the word Up! - animated! */}
-            <path 
-              d="M 38 102 L 162 102 L 170 94 L 176 110 L 186 58 L 197 132 L 208 102 L 215 92 L 221 102 L 312 102" 
-              stroke="#00914E" 
-              strokeWidth="4.5" 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              className="animate-ecg-line"
-            />
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md text-center">
+        <div className="mb-3 max-w-[290px] mx-auto select-none">
+          <svg viewBox="0 0 350 135" className="w-full h-auto" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <text x="50%" y="44" textAnchor="middle" fill="#00914E" style={{ fontSize: '38px', fontWeight: '900', fontFamily: 'Prompt, sans-serif', letterSpacing: '0.04em' }}>THAIRATH</text>
+            <text x="68" y="80" fill="#000000" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '800', fontSize: '28px' }}>HEALTH</text>
+            <text x="208" y="80" fill="#00914E" style={{ fontFamily: 'Prompt, sans-serif', fontWeight: '900', fontSize: '28px' }}>Up!</text>
+            <path d="M 38 102 L 162 102 L 170 94 L 176 110 L 186 58 L 197 132 L 208 102 L 215 92 L 221 102 L 312 102" stroke="#E8F5E9" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />
+            <path d="M 38 102 L 162 102 L 170 94 L 176 110 L 186 58 L 197 132 L 208 102 L 215 92 L 221 102 L 312 102" stroke="#00914E" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" className="animate-ecg-line" />
           </svg>
         </div>
-
-        <p className="mt-2 text-sm text-slate-500 font-extrabold flex items-center justify-center gap-2 text-center tracking-wide">
-          <span className="w-2 h-2 rounded-full bg-[#00914E] animate-pulse"></span>
-          วันนี้คุณก้าวแล้วหรือยัง?
+        <p className="text-sm text-slate-500 font-bold flex items-center justify-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-[#00914E] animate-pulse" /> Step Up Together
         </p>
       </div>
 
-      {/* Main Login Form Box in Modern Web Design style matching Thairath Careers recruitment design */}
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-10 px-8 sm:px-10 rounded-3xl border border-slate-100 shadow-[0_12px_44px_rgba(0,0,0,0.04)] relative overflow-hidden">
-          
+      <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-white py-8 px-6 shadow-xl rounded-3xl border border-slate-100 relative">
           {loading && (
-            <div className="absolute inset-0 bg-white/75 backdrop-blur-xs flex flex-col items-center justify-center z-50">
-              <div className="w-10 h-10 border-4 border-[#00914E] border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-xs font-bold text-[#00914E] mt-3">กำลังยืนยันข้อมูลพนักงาน...</p>
+            <div className="absolute inset-0 z-30 bg-white/90 rounded-3xl flex flex-col items-center justify-center">
+              <div className="w-8 h-8 border-3 border-[#00914E] border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm font-bold text-[#00914E] mt-3">กำลังโหลดข้อมูลที่จำเป็น...</p>
             </div>
           )}
 
           {!firstTimeSetupActive ? (
-            /* Sign In flow via Employee ID */
-            <form onSubmit={handleSignInSubmit} className="space-y-6">
-              
-              <div className="text-center mb-6">
-                <h3 className="text-[20px] font-black tracking-tight text-black">
-                  {isAdminLogin ? 'สำหรับผู้ดูแลระบบ (Admin Center)' : 'ลงชื่อเข้าใช้งาน'}
-                </h3>
+            <form onSubmit={handleSignInSubmit} className="space-y-5">
+              <div className="text-center mb-5">
+                <h3 className="text-xl font-black text-black">{isAdminLogin ? 'เข้าสู่ระบบผู้ดูแล' : 'ลงชื่อเข้าใช้งาน'}</h3>
+                <p className="text-xs text-slate-500 mt-1">ระบบจะโหลดเฉพาะข้อมูลที่เกี่ยวข้องกับผู้ใช้งาน</p>
               </div>
-
-              {signinError && (
-                <div className="p-3.5 bg-red-50 text-red-600 rounded-xl border border-red-100 text-xs font-bold leading-relaxed">
-                  ⚠️ {signinError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
-                  {isAdminLogin ? 'ชื่อบัญชีแอดมิน (Admin ID / Email)' : 'รหัสพนักงาน (6 หลัก)'}
-                </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
-                    <User className="w-4.5 h-4.5" />
-                  </span>
-                  <input
-                    type="text"
-                    value={employeeId}
-                    onChange={(e) => {
-                      if (isAdminLogin) {
-                        setEmployeeId(e.target.value);
-                      } else {
-                        const val = e.target.value.replace(/\D/g, '');
-                        setEmployeeId(val);
-                      }
-                    }}
-                    placeholder=""
-                    className="w-full bg-[#F8FAFC] border border-slate-250 rounded-xl pl-11 pr-4 py-4 text-sm font-semibold outline-none focus:border-[#00914E] focus:bg-white text-gray-900 transition-all font-mono focus:ring-4 focus:ring-emerald-50"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
-                  {isAdminLogin ? 'รหัสผ่านแอดมิน (Admin Passcode)' : 'Password (วันเดือนปีเกิด 6 หลัก พ.ศ.)'}
-                </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
-                    <Lock className="w-4.5 h-4.5" />
-                  </span>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => {
-                      if (isAdminLogin) {
-                        setPassword(e.target.value);
-                      } else {
-                        const val = e.target.value.replace(/\D/g, '');
-                        setPassword(val);
-                      }
-                    }}
-                    placeholder=""
-                    className="w-full bg-[#F8FAFC] border border-slate-250 rounded-xl pl-11 pr-12 py-4 text-sm font-semibold outline-none focus:border-[#00914E] focus:bg-white text-gray-900 transition-all font-mono tracking-widest focus:ring-4 focus:ring-emerald-50"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-[#000000] cursor-pointer/10 transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full mt-4 bg-[#00914E] hover:bg-[#00703c] text-white font-extrabold py-4 px-4 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md transition-all active:scale-[0.98] duration-150 uppercase tracking-wider"
-              >
-                <span>Ready to STEP UP!</span>
-                <ArrowRight className="w-4 h-4" />
+              {signinError && <div className="p-3.5 bg-red-50 text-red-600 rounded-xl border border-red-100 text-sm font-bold">⚠️ {signinError}</div>}
+              <Field label={isAdminLogin ? 'ชื่อบัญชี Admin' : 'รหัสพนักงาน 6 หลัก'} icon={<User className="w-5 h-5" />}>
+                <input
+                  type="text"
+                  value={employeeId}
+                  onChange={(event) => setEmployeeId(isAdminLogin ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="field-input pl-12"
+                  autoComplete="username"
+                  required
+                />
+              </Field>
+              <Field label={isAdminLogin ? 'รหัสผ่าน Admin' : 'วันเดือนปีเกิด 6 หลัก พ.ศ.'} icon={<Lock className="w-5 h-5" />}>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(event) => setPassword(isAdminLogin ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="field-input pl-12 pr-12 tracking-widest"
+                  autoComplete="current-password"
+                  required
+                />
+                <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 cursor-pointer">
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </Field>
+              <button type="submit" className="w-full bg-[#00914E] hover:bg-[#00703c] text-white font-extrabold py-4 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer shadow-sm">
+                Ready to STEP UP! <ArrowRight className="w-4 h-4" />
               </button>
             </form>
           ) : (
-            /* First-time setup dynamic wizard flow (Eliminating need for traditional register/sign-up tab) */
-            <form onSubmit={handleFirstTimeSubmit} className="space-y-4">
-              <div className="text-center mb-1">
-                <div className="inline-flex bg-[#E8F5E9] p-3 rounded-full text-[#00914E] mb-3">
-                  <ShieldCheck className="w-7 h-7" />
-                </div>
-                <h3 className="text-lg font-black text-slate-900">ตรวจพบผู้ใช้งานครั้งแรก! ✨</h3>
-                <p className="text-xs text-slate-500 mt-1 font-medium leading-relaxed">ยืนยันตัวตนจากฐานพนักงานแล้ว เหลือเพียงตั้งชื่อเล่นและฝ่ายสำหรับแสดงบนบอร์ด</p>
+            <form onSubmit={handleFirstTimeSubmit} className="space-y-5">
+              <div className="text-center">
+                <div className="inline-flex bg-emerald-50 p-3 rounded-full text-[#00914E] mb-3"><ShieldCheck className="w-7 h-7" /></div>
+                <h3 className="text-lg font-black text-slate-900">ยืนยันตัวตนเรียบร้อย</h3>
+                <p className="text-sm text-slate-500 mt-1">BU และฝ่ายอ้างอิงจากฐานพนักงาน คุณตั้งค่าเฉพาะชื่อเล่นได้</p>
               </div>
-
-              <div className="bg-slate-50 p-3 rounded-xl text-xs border border-slate-100 space-y-1.5 text-[#344054] font-medium">
-                <div>รหัสพนักงาน: <strong className="font-mono text-[#00914E] bg-white px-2 py-0.5 rounded text-xs border border-slate-100">{employeeId}</strong></div>
-                <div>อายุจากฐานวันเกิด: <strong className="font-mono text-gray-800 bg-white px-2 py-0.5 rounded text-xs border border-slate-100">{pendingProfile?.age ? `${pendingProfile.age} ปี` : 'คำนวณอัตโนมัติ'}</strong></div>
+              <div className="bg-slate-50 p-4 rounded-xl text-sm border border-slate-100 space-y-2">
+                <p>รหัสพนักงาน: <strong>{pendingResult?.profile.employeeId}</strong></p>
+                <p className="flex items-center gap-2"><Building2 className="w-4 h-4 text-[#00914E]" /> BU: <strong>{pendingResult?.profile.buId || 'ยังไม่ระบุ'}</strong></p>
+                <p>ฝ่าย: <strong>{pendingResult?.profile.departmentId || 'ยังไม่ระบุ'}</strong></p>
               </div>
-
-              {newUserError && (
-                <div className="p-3 bg-red-50 text-red-600 rounded-xl border border-red-100 text-xs font-bold">
-                  ⚠️ {newUserError}
-                </div>
-              )}
-
+              {newUserError && <div className="p-3 bg-red-50 text-red-600 rounded-xl text-sm font-bold">⚠️ {newUserError}</div>}
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1 tracking-wider">
-                  ชื่อเล่น (สำหรับแสดงบนบอร์ดและรายการก้าว)
-                </label>
-                <input
-                  type="text"
-                  value={newNickname}
-                  onChange={(e) => setNewNickname(e.target.value)}
-                  placeholder="เช่น ยอด"
-                  maxLength={15}
-                  className="w-full bg-[#F8FAFC] border border-slate-200 rounded-xl px-4 py-3 text-xs sm:text-sm font-semibold outline-none focus:border-[#00914E] focus:bg-white text-gray-800 transition-all"
-                  required
-                />
+                <label className="block text-sm font-bold text-slate-600 mb-2">ชื่อเล่นที่แสดงในระบบ</label>
+                <input value={newNickname} onChange={(event) => setNewNickname(event.target.value)} maxLength={30} className="field-input" required />
               </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1 tracking-wider">
-                  ฝ่าย
-                </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                    <Building2 className="w-4 h-4" />
-                  </span>
-                  <select
-                    value={newDept}
-                    onChange={(e) => setNewDept(e.target.value)}
-                    className="w-full bg-[#F8FAFC] border border-slate-200 rounded-xl pl-10 pr-3 py-3 text-xs sm:text-sm font-bold text-slate-700 outline-none focus:border-[#00914E] focus:bg-white transition-all cursor-pointer"
-                  >
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.nameTh}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setFirstTimeSetupActive(false)}
-                  className="w-1/3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-3 rounded-xl text-xs transition-all cursor-pointer"
-                >
-                  กลับ
-                </button>
-                <button
-                  type="submit"
-                  className="w-2/3 bg-[#00914E] hover:bg-[#00703c] text-white font-extrabold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer shadow-sm transition-all active:scale-[0.98] duration-150"
-                >
-                  <span>เริ่มใช้งานระบบ</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setFirstTimeSetupActive(false)} className="w-1/3 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl text-sm cursor-pointer">กลับ</button>
+                <button type="submit" className="w-2/3 bg-[#00914E] text-white font-extrabold py-3 rounded-xl text-sm cursor-pointer">เริ่มใช้งาน</button>
               </div>
             </form>
           )}
-
         </div>
       </div>
+      <div className="mt-8 text-center text-xs text-slate-400 font-semibold">People Partner Division · Thairath Group</div>
+    </div>
+  );
+}
 
-      {/* Footer credits in Thairath Style */}
-      <div className="mt-8 text-center text-[10px] text-slate-400 font-bold tracking-wider uppercase">
-        People Partner Division, People Department Thairath Group
+function Field({ label, icon, children }: { label: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-sm font-bold text-slate-600 mb-2">{label}</label>
+      <div className="relative">
+        <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">{icon}</span>
+        {children}
       </div>
     </div>
   );

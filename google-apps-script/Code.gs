@@ -1,123 +1,107 @@
 /**
- * Thairath Step Up & Health Up — Google Sheets Backend
- * Deploy this file as a Google Apps Script Web App and set the Web App URL
- * in Vercel as GOOGLE_APPS_SCRIPT_URL.
+ * Thairath Step Up & Health Up — v2.4 Google Sheets Backend
+ * Deploy as Web App: Execute as Me / Who has access: Anyone.
  */
 
 const CONFIG = {
-  // Recommended: keep this blank if the Apps Script is bound to the target Google Sheet.
-  // For standalone script, paste the Spreadsheet ID here or set Script Property SHEET_ID.
   SPREADSHEET_ID: '1YgxxKpP74EkzfzAJn2wnTXamrYJ9-aBZsKwcBo7v3Dk',
   EMPLOYEE_SHEET: 'Employees',
   LOG_SHEET: 'StepLogs',
   TIMEZONE: 'Asia/Bangkok',
   WEEKLY_TARGET: 7000,
   OCR_AUTO_VERIFY_MIN_CONFIDENCE: 60,
+  SUBMISSION_GRACE_DAYS: 21,
   EVIDENCE_ROOT_FOLDER_ID: '1aA_KkQN8Q-x8XPO_LrCLxlKXEGNH4g4R'
 };
 
+// Keep all original employee columns in their existing positions. buId is appended at the end.
 const EMPLOYEE_HEADERS = [
-  'employeeId',
-  'password',
-  'dateOfBirth',
-  'name',
-  'Surename',
-  'nickname',
-  'departmentId',
-  'weekTarget',
-  'totalTickets',
-  'email',
-  'status',
-  'createdAt',
-  'updatedAt',
-  'lastLoginAt',
-  'lastSubmitAt'
+  'employeeId', 'password', 'dateOfBirth', 'name', 'Surename', 'nickname',
+  'departmentId', 'weekTarget', 'totalTickets', 'email', 'status', 'createdAt',
+  'updatedAt', 'lastLoginAt', 'lastSubmitAt', 'buId'
 ];
 
+// Keep the original 20 StepLogs columns in place. Organisation snapshots are appended.
 const LOG_HEADERS = [
-  'id',
-  'userEmail',
-  'employeeId',
-  'date',
-  'steps',
-  'week',
-  'weekOfMonth',
-  'imageName',
-  'submittedAt',
-  'createdAt',
-  'updatedAt',
-  'imageFileId',
-  'imageUrl',
-  'ocrText',
-  'ocrSteps',
-  'ocrConfidence',
-  'verificationStatus',
-  'reviewNote',
-  'reviewedBy',
-  'reviewedAt'
+  'id', 'userEmail', 'employeeId', 'date', 'steps', 'week', 'weekOfMonth',
+  'imageName', 'submittedAt', 'createdAt', 'updatedAt', 'imageFileId', 'imageUrl',
+  'ocrText', 'ocrSteps', 'ocrConfidence', 'verificationStatus', 'reviewNote',
+  'reviewedBy', 'reviewedAt', 'buIdAtSubmission', 'departmentIdAtSubmission'
 ];
 
-const DEPARTMENTS = [
-  { id: 'ceo', nameTh: 'สายงาน CEO', nameEn: 'CEO Office', participationRate: 92, averageStepsPerPerson: 8250, status: 'up', statusText: 'เพิ่มขึ้น 1 อันดับ' },
-  { id: 'creative_digital', nameTh: 'ฝ่าย Creative Digital Studio', nameEn: 'Creative Digital Studio', participationRate: 85, averageStepsPerPerson: 7300, status: 'stable', statusText: 'คงที่' },
-  { id: 'mirror', nameTh: 'ฝ่าย Mirror', nameEn: 'Mirror Editorial', participationRate: 80, averageStepsPerPerson: 6950, status: 'down', statusText: 'ลดลง 1 อันดับ' },
-  { id: 'prod_tech_prod', nameTh: 'ฝ่าย Product & Technology (Product)', nameEn: 'Product & Tech (Product)', participationRate: 88, averageStepsPerPerson: 7850, status: 'up', statusText: 'เพิ่มขึ้น 2 อันดับ' },
-  { id: 'prod_tech_tech', nameTh: 'ฝ่าย Product & Technology (Tech)', nameEn: 'Product & Tech (Tech)', participationRate: 90, averageStepsPerPerson: 8100, status: 'up', statusText: 'เพิ่มขึ้น 3 อันดับ' },
-  { id: 'tr_creative', nameTh: 'ฝ่าย Thairath Creative', nameEn: 'Thairath Creative', participationRate: 84, averageStepsPerPerson: 7200, status: 'stable', statusText: 'คงที่' },
-  { id: 'tr_money', nameTh: 'ฝ่าย Thairath Money', nameEn: 'Thairath Money', participationRate: 86, averageStepsPerPerson: 7420, status: 'stable', statusText: 'คงที่' },
-  { id: 'marketing', nameTh: 'ฝ่ายการตลาด', nameEn: 'Marketing Department', participationRate: 78, averageStepsPerPerson: 6800, status: 'down', statusText: 'ลดลง 1 อันดับ' },
-  { id: 'event', nameTh: 'ฝ่าย Event', nameEn: 'Event Department', participationRate: 82, averageStepsPerPerson: 7600, status: 'up', statusText: 'เพิ่มขึ้น 1 อันดับ' },
-  { id: 'editorial_online', nameTh: 'ฝ่ายบรรณาธิการออนไลน์', nameEn: 'Online Editorial', participationRate: 89, averageStepsPerPerson: 7900, status: 'stable', statusText: 'คงที่' },
-  { id: 'business_dev', nameTh: 'ฝ่ายพัฒนาธุรกิจ', nameEn: 'Business Development', participationRate: 75, averageStepsPerPerson: 6500, status: 'down', statusText: 'ลดลง 2 อันดับ' },
-  { id: 'thairath_plus', nameTh: 'ฝ่ายไทยรัฐพลัส', nameEn: 'Thairath Plus', participationRate: 81, averageStepsPerPerson: 7120, status: 'stable', statusText: 'คงที่' },
-  { id: 'sales_private_1', nameTh: 'ฝ่ายขายเอกชน 1', nameEn: 'Enterprise Sales 1', participationRate: 77, averageStepsPerPerson: 6700, status: 'down', statusText: 'ลดลง 1 อันดับ' },
-  { id: 'sales_private_2', nameTh: 'ฝ่ายขายเอกชน 2', nameEn: 'Enterprise Sales 2', participationRate: 79, averageStepsPerPerson: 6920, status: 'up', statusText: 'เพิ่มขึ้น 1 อันดับ' },
-  { id: 'sales_private_3', nameTh: 'ฝ่ายขายเอกชน 3', nameEn: 'Enterprise Sales 3', participationRate: 74, averageStepsPerPerson: 6450, status: 'stable', statusText: 'คงที่' },
-  { id: 'sales_operation', nameTh: 'ส่วนงาน Sales Operation', nameEn: 'Sales Operations Group', participationRate: 83, averageStepsPerPerson: 7350, status: 'up', statusText: 'เพิ่มขึ้น 1 อันดับ' },
-  { id: 'safety_she', nameTh: 'ฝ่ายความปลอดภัยอาชีวอนามัยและสภาพแวดล้อมในการทำงาน', nameEn: 'Safety & SHE Department', participationRate: 94, averageStepsPerPerson: 8950, status: 'stable', statusText: 'คงที่อันดับ 1' },
-  { id: 'sales_gov', nameTh: 'ฝ่ายขายราชการ', nameEn: 'Government Sales', participationRate: 76, averageStepsPerPerson: 6600, status: 'down', statusText: 'ลดลง 1 อันดับ' }
+const CAMPAIGN_WEEKS = [
+  { month: 1, week: 1, startDate: '2026-07-01', endDate: '2026-07-10' },
+  { month: 1, week: 2, startDate: '2026-07-11', endDate: '2026-07-17' },
+  { month: 1, week: 3, startDate: '2026-07-18', endDate: '2026-07-24' },
+  { month: 1, week: 4, startDate: '2026-07-25', endDate: '2026-07-31' },
+  { month: 2, week: 1, startDate: '2026-08-01', endDate: '2026-08-07' },
+  { month: 2, week: 2, startDate: '2026-08-08', endDate: '2026-08-14' },
+  { month: 2, week: 3, startDate: '2026-08-15', endDate: '2026-08-21' },
+  { month: 2, week: 4, startDate: '2026-08-22', endDate: '2026-08-28' },
+  { month: 3, week: 1, startDate: '2026-08-29', endDate: '2026-09-04' },
+  { month: 3, week: 2, startDate: '2026-09-05', endDate: '2026-09-11' },
+  { month: 3, week: 3, startDate: '2026-09-12', endDate: '2026-09-18' },
+  { month: 3, week: 4, startDate: '2026-09-19', endDate: '2026-09-25' },
+  { month: 4, week: 1, startDate: '2026-09-26', endDate: '2026-10-02' },
+  { month: 4, week: 2, startDate: '2026-10-03', endDate: '2026-10-09' },
+  { month: 4, week: 3, startDate: '2026-10-10', endDate: '2026-10-16' },
+  { month: 4, week: 4, startDate: '2026-10-17', endDate: '2026-10-23' },
+  { month: 4, week: 5, startDate: '2026-10-24', endDate: '2026-10-30' },
+  { month: 5, week: 1, startDate: '2026-10-31', endDate: '2026-11-06' },
+  { month: 5, week: 2, startDate: '2026-11-07', endDate: '2026-11-13' },
+  { month: 5, week: 3, startDate: '2026-11-14', endDate: '2026-11-20' },
+  { month: 5, week: 4, startDate: '2026-11-21', endDate: '2026-11-27' },
+  { month: 6, week: 1, startDate: '2026-11-28', endDate: '2026-12-04' },
+  { month: 6, week: 2, startDate: '2026-12-05', endDate: '2026-12-11' }
 ];
 
 function doGet() {
   setup_();
-  return json_({ ok: true, data: { service: 'thairath-step-up-google-sheets-backend', ready: true } });
+  return json_({ ok: true, data: { service: 'thairath-step-up-v2.4-backend', ready: true } });
 }
 
 function doPost(e) {
   try {
     setup_();
     const body = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
-    const action = body.action;
+    validateProxySecret_(body);
+    const action = String(body.action || '');
+    const adminContext = body._adminContext || null;
 
     switch (action) {
       case 'setup':
         syncWeeklyTarget_();
         return json_({ ok: true, data: { ready: true, weeklyTarget: CONFIG.WEEKLY_TARGET } });
       case 'verifyLogin':
-        return json_({ ok: true, data: verifyLogin_(body.employeeId, body.password) });
+        return json_({ ok: true, data: verifyLogin_(body.employeeId, body.password, Number(body.currentMonth) || 1) });
       case 'getUserProfile':
         return json_({ ok: true, data: getUserProfile_(body.idOrEmail) });
       case 'saveUserProfile':
-        saveUserProfile_(body.idOrEmail, body.profile, body.password);
+        saveUserProfile_(body.idOrEmail, body.profile, body.password, false);
+        return json_({ ok: true, data: { saved: true } });
+      case 'adminSaveUserProfile':
+        requireAdmin_(adminContext);
+        adminSaveUserProfile_(body.idOrEmail, body.profile, body.password, adminContext);
         return json_({ ok: true, data: { saved: true } });
       case 'fetchUserLogs':
         return json_({ ok: true, data: fetchUserLogs_(body.userKey) });
       case 'saveUserLog':
         return json_({ ok: true, data: saveUserLog_(body.userKey, body.log) });
       case 'reviewUserLog':
-        return json_({ ok: true, data: reviewUserLog_(body.logId, body.verificationStatus, body.reviewNote, body.reviewedBy) });
+        requireAdmin_(adminContext);
+        return json_({ ok: true, data: reviewUserLog_(body.logId, body.verificationStatus, body.reviewNote, adminContext) });
       case 'deleteUserLog':
-        deleteUserLog_(body.logId);
+        requireAdmin_(adminContext);
+        deleteUserLog_(body.logId, adminContext);
         return json_({ ok: true, data: { deleted: true } });
-      case 'updateUserTickets':
-        updateUserTickets_(body.employeeId, body.totalTickets);
-        return json_({ ok: true, data: { saved: true } });
       case 'calculateLeaderboard':
-        return json_({ ok: true, data: calculateLeaderboard_(Number(body.currentWeek) || 1) });
+        return json_({ ok: true, data: calculateLeaderboard_(Number(body.currentMonth) || 1, Boolean(body.forceRefresh)) });
       case 'fetchAllUsers':
-        return json_({ ok: true, data: fetchAllUsers_() });
+        requireAdmin_(adminContext);
+        return json_({ ok: true, data: filterUsersForAdmin_(fetchAllUsers_(), adminContext) });
       case 'fetchAllStepLogs':
-        return json_({ ok: true, data: fetchAllStepLogs_() });
+        requireAdmin_(adminContext);
+        return json_({ ok: true, data: filterLogsForAdmin_(fetchAllStepLogs_(), adminContext) });
       default:
         return json_({ ok: false, error: 'Unknown action: ' + action });
     }
@@ -127,20 +111,31 @@ function doPost(e) {
 }
 
 function json_(payload) {
-  return ContentService
-    .createTextOutput(JSON.stringify(payload))
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function validateProxySecret_(body) {
+  const configured = PropertiesService.getScriptProperties().getProperty('APP_PROXY_SECRET');
+  if (configured && String(body._proxySecret || '') !== configured) {
+    throw new Error('Unauthorized proxy request');
+  }
+}
+
+function requireAdmin_(context) {
+  if (!context || !context.displayName) throw new Error('Admin session is required');
+}
+
+function adminCanAccessBU_(context, buId) {
+  const allowed = context && Array.isArray(context.allowedBUIds) ? context.allowedBUIds.map(normalizeText_) : [];
+  return allowed.indexOf('all') >= 0 || allowed.indexOf(normalizeText_(buId)) >= 0;
 }
 
 function ss_() {
   const propertyId = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
   const id = propertyId || CONFIG.SPREADSHEET_ID;
   if (id) return SpreadsheetApp.openById(id);
-
   const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (!active) {
-    throw new Error('Spreadsheet not found. Bind this script to a Google Sheet or set Script Property SHEET_ID.');
-  }
+  if (!active) throw new Error('Spreadsheet not found. Set Script Property SHEET_ID.');
   return active;
 }
 
@@ -149,47 +144,21 @@ function setup_() {
   ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
 }
 
-function migrateWeeklyTargetTo7000() {
-  setup_();
-  syncWeeklyTarget_();
-}
-
-function syncWeeklyTarget_() {
-  const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-
-  const targetColumn = EMPLOYEE_HEADERS.indexOf('weekTarget') + 1;
-  if (targetColumn <= 0) return;
-
-  const range = sheet.getRange(2, targetColumn, lastRow - 1, 1);
-  const currentValues = range.getValues();
-  const needsUpdate = currentValues.some(row => Number(row[0]) !== CONFIG.WEEKLY_TARGET);
-  if (!needsUpdate) return;
-
-  range.setValues(currentValues.map(() => [CONFIG.WEEKLY_TARGET]));
-}
-
 function ensureSheet_(sheetName, headers) {
   const ss = ss_();
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) sheet = ss.insertSheet(sheetName);
-
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(headers);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
     return sheet;
   }
-
-  const existing = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length)).getValues()[0];
-  let changed = false;
-  headers.forEach((h, idx) => {
-    if (existing[idx] !== h) {
-      sheet.getRange(1, idx + 1).setValue(h);
-      changed = true;
-    }
+  const width = Math.max(sheet.getLastColumn(), headers.length);
+  const existing = sheet.getRange(1, 1, 1, width).getValues()[0];
+  headers.forEach(function(header, index) {
+    if (!existing[index]) sheet.getRange(1, index + 1).setValue(header);
   });
-  if (changed) sheet.setFrozenRows(1);
+  sheet.setFrozenRows(1);
   return sheet;
 }
 
@@ -197,15 +166,18 @@ function readObjects_(sheetName, headers) {
   const sheet = ensureSheet_(sheetName, headers);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-
   const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  return values
-    .filter(row => row.some(cell => cell !== '' && cell !== null))
-    .map((row, index) => {
-      const obj = { _row: index + 2 };
-      headers.forEach((h, i) => obj[h] = row[i]);
-      return obj;
-    });
+  return values.filter(function(row) {
+    return row.some(function(cell) { return cell !== '' && cell !== null; });
+  }).map(function(row, index) {
+    return rowToObject_(row, index + 2, headers);
+  });
+}
+
+function rowToObject_(row, rowNumber, headers) {
+  const obj = { _row: rowNumber };
+  headers.forEach(function(header, index) { obj[header] = row[index]; });
+  return obj;
 }
 
 function findRow_(sheetName, headers, predicate) {
@@ -213,141 +185,86 @@ function findRow_(sheetName, headers, predicate) {
   return rows.find(predicate) || null;
 }
 
-function normalizeId_(value) {
-  return String(value || '').trim();
+function findEmployeeByKey_(idOrEmail) {
+  const key = normalizeText_(idOrEmail);
+  if (!key) return null;
+  const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  // Employee login is filtered from the first step: search only ID/email columns, then read one row.
+  const columns = [EMPLOYEE_HEADERS.indexOf('employeeId') + 1, EMPLOYEE_HEADERS.indexOf('email') + 1];
+  for (let i = 0; i < columns.length; i++) {
+    const column = columns[i];
+    const finder = sheet.getRange(2, column, lastRow - 1, 1).createTextFinder(String(idOrEmail).trim()).matchEntireCell(true);
+    const found = finder.findNext();
+    if (found) {
+      const rowNumber = found.getRow();
+      const values = sheet.getRange(rowNumber, 1, 1, EMPLOYEE_HEADERS.length).getValues()[0];
+      return rowToObject_(values, rowNumber, EMPLOYEE_HEADERS);
+    }
+  }
+  return null;
 }
 
-function normalizeText_(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function normalizeDeptKey_(value) {
-  return normalizeText_(value).replace(/^ฝ่าย\s*/i, '').replace(/\s+/g, ' ');
-}
-
-function canonicalDepartmentId_(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const key = normalizeDeptKey_(raw);
-  const matched = DEPARTMENTS.find(d => {
-    return normalizeDeptKey_(d.id) === key ||
-      normalizeDeptKey_(d.nameTh) === key ||
-      normalizeDeptKey_(d.nameEn) === key;
-  });
-  return matched ? matched.id : raw;
-}
-
-function departmentLabel_(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const id = canonicalDepartmentId_(raw);
-  const matched = DEPARTMENTS.find(d => normalizeDeptKey_(d.id) === normalizeDeptKey_(id));
-  return matched ? matched.nameTh : raw;
-}
-
-function getDepartmentCatalog_(users) {
-  const byId = {};
-
-  (users || []).forEach(u => {
-    const rawDept = String(u.departmentId || '').trim();
-    if (!rawDept) return;
-    const id = canonicalDepartmentId_(rawDept);
-    if (byId[id]) return;
-
-    const known = DEPARTMENTS.find(d => normalizeDeptKey_(d.id) === normalizeDeptKey_(id));
-    byId[id] = known
-      ? Object.assign({}, known)
-      : {
-          id: id,
-          nameTh: departmentLabel_(rawDept) || id,
-          nameEn: departmentLabel_(rawDept) || id,
-          participationRate: 0,
-          averageStepsPerPerson: 0,
-          status: 'stable',
-          statusText: 'ข้อมูลจาก Google Sheets'
-        };
-  });
-
-  // Fallback for an empty database so the frontend still has a valid structure.
-  return Object.keys(byId).length > 0
-    ? Object.keys(byId).map(id => byId[id])
-    : DEPARTMENTS.map(d => Object.assign({}, d, { participationRate: 0, averageStepsPerPerson: 0 }));
-}
-
-function sameDepartment_(a, b) {
-  return normalizeDeptKey_(canonicalDepartmentId_(a)) === normalizeDeptKey_(canonicalDepartmentId_(b));
-}
-
+function normalizeId_(value) { return String(value || '').trim(); }
+function normalizeText_(value) { return String(value || '').trim().toLowerCase(); }
 function number_(value, fallback) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+function now_() { return Utilities.formatDate(new Date(), CONFIG.TIMEZONE, "yyyy-MM-dd'T'HH:mm:ssXXX"); }
+function toIsoDate_(date) { return date ? Utilities.formatDate(date, CONFIG.TIMEZONE, 'yyyy-MM-dd') : ''; }
+function average_(values) {
+  const valid = (values || []).map(Number).filter(function(value) { return Number.isFinite(value); });
+  return valid.length ? Math.round(valid.reduce(function(sum, value) { return sum + value; }, 0) / valid.length) : 0;
 }
 
-function now_() {
-  return Utilities.formatDate(new Date(), CONFIG.TIMEZONE, "yyyy-MM-dd'T'HH:mm:ssXXX");
-}
+function migrateWeeklyTargetTo7000() { setup_(); syncWeeklyTarget_(); }
 
-function toIsoDate_(date) {
-  if (!date) return '';
-  return Utilities.formatDate(date, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+function syncWeeklyTarget_() {
+  const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const targetColumn = EMPLOYEE_HEADERS.indexOf('weekTarget') + 1;
+  const range = sheet.getRange(2, targetColumn, lastRow - 1, 1);
+  range.setValues(range.getValues().map(function() { return [CONFIG.WEEKLY_TARGET]; }));
 }
 
 function parseBirthDate_(value, passwordFallback) {
   if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) return value;
-
   const raw = String(value || '').trim();
   if (!raw && passwordFallback) return parseBirthDate_(passwordFallback, '');
   if (!raw) return null;
-
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     const parts = raw.split('-').map(Number);
     return new Date(parts[0], parts[1] - 1, parts[2]);
   }
-
   const separated = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})$/);
-  if (separated) {
-    return dateFromDmy_(Number(separated[1]), Number(separated[2]), Number(separated[3]));
-  }
-
-  if (/^\d{8}$/.test(raw)) {
-    return dateFromDmy_(Number(raw.slice(0, 2)), Number(raw.slice(2, 4)), Number(raw.slice(4, 8)));
-  }
-
-  if (/^\d{6}$/.test(raw)) {
-    return dateFromDmy_(Number(raw.slice(0, 2)), Number(raw.slice(2, 4)), Number(raw.slice(4, 6)));
-  }
-
+  if (separated) return dateFromDmy_(Number(separated[1]), Number(separated[2]), Number(separated[3]));
+  if (/^\d{8}$/.test(raw)) return dateFromDmy_(Number(raw.slice(0, 2)), Number(raw.slice(2, 4)), Number(raw.slice(4, 8)));
+  if (/^\d{6}$/.test(raw)) return dateFromDmy_(Number(raw.slice(0, 2)), Number(raw.slice(2, 4)), Number(raw.slice(4, 6)));
   return null;
 }
 
 function dateFromDmy_(day, month, year) {
   if (!day || !month || !year) return null;
-
   const currentYear = new Date().getFullYear();
   const candidates = [];
-
   if (year < 100) {
-    candidates.push(2500 + year - 543); // Thai Buddhist year, e.g. 42 -> 2542 -> 1999
-    candidates.push(2400 + year - 543); // Older generation, e.g. 12 -> 2512 -> 1969
-    candidates.push(1900 + year);
-    candidates.push(2000 + year);
+    candidates.push(2500 + year - 543, 2400 + year - 543, 1900 + year, 2000 + year);
   } else if (year > 2400) {
     candidates.push(year - 543);
   } else {
     candidates.push(year);
   }
-
-  const valid = candidates
-    .map(y => new Date(y, month - 1, day))
-    .filter(d => !isNaN(d.getTime()) && d.getDate() === day && d.getMonth() === month - 1)
-    .sort((a, b) => {
-      const ageA = currentYear - a.getFullYear();
-      const ageB = currentYear - b.getFullYear();
-      const scoreA = ageA >= 15 && ageA <= 80 ? 0 : 1;
-      const scoreB = ageB >= 15 && ageB <= 80 ? 0 : 1;
-      return scoreA - scoreB;
-    });
-
+  const valid = candidates.map(function(y) { return new Date(y, month - 1, day); }).filter(function(date) {
+    return !isNaN(date.getTime()) && date.getDate() === day && date.getMonth() === month - 1;
+  }).sort(function(a, b) {
+    const ageA = currentYear - a.getFullYear();
+    const ageB = currentYear - b.getFullYear();
+    return (ageA >= 15 && ageA <= 80 ? 0 : 1) - (ageB >= 15 && ageB <= 80 ? 0 : 1);
+  });
   return valid[0] || null;
 }
 
@@ -355,25 +272,14 @@ function calculateAge_(date) {
   if (!date) return '';
   const today = new Date();
   let age = today.getFullYear() - date.getFullYear();
-  const m = today.getMonth() - date.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < date.getDate())) age--;
+  const month = today.getMonth() - date.getMonth();
+  if (month < 0 || (month === 0 && today.getDate() < date.getDate())) age--;
   return age;
 }
 
 function passwordFromBirthDate_(date) {
   if (!date) return '';
-  const day = Utilities.formatDate(date, CONFIG.TIMEZONE, 'dd');
-  const month = Utilities.formatDate(date, CONFIG.TIMEZONE, 'MM');
-  const thaiYearLast2 = String(date.getFullYear() + 543).slice(-2);
-  return day + month + thaiYearLast2;
-}
-
-function getEmployeeByIdOrEmail_(idOrEmail) {
-  const key = normalizeText_(idOrEmail);
-  if (!key) return null;
-  return findRow_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS, r => {
-    return normalizeText_(r.employeeId) === key || normalizeText_(r.email) === key;
-  });
+  return Utilities.formatDate(date, CONFIG.TIMEZONE, 'ddMM') + String(date.getFullYear() + 543).slice(-2);
 }
 
 function employeeToProfile_(row) {
@@ -383,12 +289,12 @@ function employeeToProfile_(row) {
   const nickname = String(row.nickname || '').trim();
   const firstName = String(row.name || '').trim();
   const surname = String(row.Surename || '').trim();
-  const fullName = [firstName, surname].filter(Boolean).join(' ').trim();
   return {
-    name: String(fullName || (nickname ? 'คุณ' + nickname : 'พนักงานไทยรัฐ')).trim(),
+    name: [firstName, surname].filter(Boolean).join(' ').trim() || (nickname ? 'คุณ' + nickname : 'พนักงาน'),
     surname: surname,
     nickname: nickname,
-    departmentId: canonicalDepartmentId_(row.departmentId) || 'ceo',
+    buId: normalizeId_(row.buId) || 'UNASSIGNED',
+    departmentId: normalizeId_(row.departmentId) || 'UNASSIGNED',
     weekTarget: CONFIG.WEEKLY_TARGET,
     totalTickets: number_(row.totalTickets, 0),
     email: String(row.email || (employeeId ? employeeId + '@thairathgroup.com' : '')).trim(),
@@ -403,126 +309,116 @@ function employeeToProfile_(row) {
 function recordLastLogin_(employeeRow) {
   if (!employeeRow || !employeeRow._row) return;
   const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
-  const lastLoginCol = EMPLOYEE_HEADERS.indexOf('lastLoginAt') + 1;
-  if (lastLoginCol > 0) {
-    sheet.getRange(employeeRow._row, lastLoginCol).setValue(now_());
-  }
+  sheet.getRange(employeeRow._row, EMPLOYEE_HEADERS.indexOf('lastLoginAt') + 1).setValue(now_());
 }
 
 function updateEmployeeTimestamp_(employeeId, headerName, value) {
-  const employee = getEmployeeByIdOrEmail_(employeeId);
-  if (!employee || !employee._row) return;
+  const employee = findEmployeeByKey_(employeeId);
+  if (!employee) return;
   const column = EMPLOYEE_HEADERS.indexOf(headerName) + 1;
-  if (column <= 0) return;
-  const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
-  sheet.getRange(employee._row, column).setValue(value || '');
+  if (column > 0) ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS).getRange(employee._row, column).setValue(value || '');
 }
 
-function recalculateLastSubmitAt_(employeeId) {
-  const cleanId = normalizeText_(employeeId);
-  const latest = fetchAllStepLogs_()
-    .filter(log => normalizeText_(log.employeeId) === cleanId)
-    .sort((a, b) => String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')))[0];
-  updateEmployeeTimestamp_(employeeId, 'lastSubmitAt', latest ? latest.submittedAt : '');
-}
-
-function verifyLogin_(employeeId, password) {
+function verifyLogin_(employeeId, password, currentMonth) {
   const cleanId = normalizeId_(employeeId);
   const cleanPassword = normalizeId_(password);
   if (!/^\d{6}$/.test(cleanId)) throw new Error('รหัสพนักงานต้องเป็นตัวเลข 6 หลัก');
   if (!/^\d{6}$/.test(cleanPassword)) throw new Error('รหัสผ่านวันเกิดต้องเป็นตัวเลข 6 หลัก');
-
-  const row = getEmployeeByIdOrEmail_(cleanId);
+  const row = findEmployeeByKey_(cleanId);
   if (!row) throw new Error('ไม่พบรหัสพนักงานนี้ในฐานข้อมูล กรุณาติดต่อ HR/Admin');
-
-  if (String(row.status || 'Active').toLowerCase() !== 'active') {
-    throw new Error('รหัสพนักงานนี้ยังไม่ได้เปิดสิทธิ์ใช้งาน');
-  }
-
+  if (normalizeText_(row.status || 'Active') !== 'active') throw new Error('รหัสพนักงานนี้ยังไม่ได้เปิดสิทธิ์ใช้งาน');
   const birthDate = parseBirthDate_(row.dateOfBirth, row.password);
   const expectedPassword = normalizeId_(row.password) || passwordFromBirthDate_(birthDate);
-  if (expectedPassword && expectedPassword !== cleanPassword) {
-    throw new Error('รหัสผ่านวันเดือนปีเกิดไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
-  }
+  if (expectedPassword && expectedPassword !== cleanPassword) throw new Error('รหัสผ่านวันเดือนปีเกิดไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
 
   recordLastLogin_(row);
-  const refreshedRow = getEmployeeByIdOrEmail_(cleanId) || row;
-  const profile = employeeToProfile_(refreshedRow);
+  const refreshed = findEmployeeByKey_(cleanId) || row;
+  const profile = employeeToProfile_(refreshed);
   return {
     profile: profile,
-    requiresSetup: !profile.nickname || !profile.departmentId
+    requiresSetup: !profile.nickname,
+    logs: fetchUserLogs_(cleanId),
+    leaderboard: calculateLeaderboard_(currentMonth)
   };
 }
 
 function getUserProfile_(idOrEmail) {
-  const row = getEmployeeByIdOrEmail_(idOrEmail);
-  return row ? employeeToProfile_(row) : null;
+  return employeeToProfile_(findEmployeeByKey_(idOrEmail));
 }
 
-function saveUserProfile_(idOrEmail, profile, password) {
+function saveUserProfile_(idOrEmail, profile, password, allowOrgChange) {
   if (!profile) throw new Error('Missing profile payload');
   const employeeId = normalizeId_(profile.employeeId || idOrEmail);
   if (!/^\d{6}$/.test(employeeId)) throw new Error('รหัสพนักงานต้องเป็นตัวเลข 6 หลัก');
-
   const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
-  const existing = getEmployeeByIdOrEmail_(employeeId);
-  const birthDate = parseBirthDate_(profile.dateOfBirth, password);
-  const passwordValue = normalizeId_(password) || (birthDate ? passwordFromBirthDate_(birthDate) : (existing ? existing.password : ''));
+  const existing = findEmployeeByKey_(employeeId);
+  if (!existing && !allowOrgChange) throw new Error('ไม่พบข้อมูลพนักงาน ไม่อนุญาตให้สร้างบัญชีจากหน้า User');
+
+  const submittedBirthDate = parseBirthDate_(profile.dateOfBirth, password);
+  const birthDateValue = allowOrgChange
+    ? (submittedBirthDate ? toIsoDate_(submittedBirthDate) : (existing ? existing.dateOfBirth : ''))
+    : (existing ? existing.dateOfBirth : '');
+  const passwordValue = allowOrgChange
+    ? (normalizeId_(password) || (submittedBirthDate ? passwordFromBirthDate_(submittedBirthDate) : (existing ? existing.password : '')))
+    : (existing ? existing.password : '');
   const createdAt = existing ? existing.createdAt : now_();
+  const buId = allowOrgChange ? normalizeId_(profile.buId) : normalizeId_(existing && existing.buId);
+  const departmentId = allowOrgChange ? normalizeId_(profile.departmentId) : normalizeId_(existing && existing.departmentId);
   const rowValues = [
     employeeId,
     passwordValue,
-    birthDate ? toIsoDate_(birthDate) : (existing ? existing.dateOfBirth : ''),
-    profile.name || (existing ? existing.name : ''),
-    profile.surname || profile.Surename || (existing ? existing.Surename : ''),
+    birthDateValue,
+    allowOrgChange ? (profile.name || (existing ? existing.name : '')) : existing.name,
+    allowOrgChange ? (profile.surname || profile.Surename || (existing ? existing.Surename : '')) : existing.Surename,
     profile.nickname || (existing ? existing.nickname : ''),
-    canonicalDepartmentId_(profile.departmentId || (existing ? existing.departmentId : 'ceo')) || 'ceo',
+    departmentId || 'UNASSIGNED',
     CONFIG.WEEKLY_TARGET,
-    number_(profile.totalTickets, existing ? existing.totalTickets : 0),
-    profile.email || (existing ? existing.email : employeeId + '@thairathgroup.com'),
-    'Active',
+    allowOrgChange ? number_(profile.totalTickets, existing ? existing.totalTickets : 0) : number_(existing.totalTickets, 0),
+    allowOrgChange ? (profile.email || (existing ? existing.email : employeeId + '@thairathgroup.com')) : existing.email,
+    existing ? (existing.status || 'Active') : 'Active',
     createdAt,
     now_(),
     existing ? String(existing.lastLoginAt || '') : '',
-    existing ? String(existing.lastSubmitAt || '') : ''
+    existing ? String(existing.lastSubmitAt || '') : '',
+    buId || 'UNASSIGNED'
   ];
+  if (existing) sheet.getRange(existing._row, 1, 1, EMPLOYEE_HEADERS.length).setValues([rowValues]);
+  else sheet.appendRow(rowValues);
+  invalidateLeaderboardCache_();
+}
 
-  if (existing) {
-    sheet.getRange(existing._row, 1, 1, EMPLOYEE_HEADERS.length).setValues([rowValues]);
-  } else {
-    sheet.appendRow(rowValues);
+function adminSaveUserProfile_(idOrEmail, profile, password, adminContext) {
+  if (!profile) throw new Error('Missing profile payload');
+  const existing = findEmployeeByKey_(profile.employeeId || idOrEmail);
+  if (existing && !adminCanAccessBU_(adminContext, existing.buId || 'UNASSIGNED')) {
+    throw new Error('ไม่มีสิทธิ์แก้ไขพนักงานใน BU เดิม');
   }
+  const targetBuId = normalizeId_(profile.buId) || 'UNASSIGNED';
+  if (!adminCanAccessBU_(adminContext, targetBuId)) {
+    throw new Error('ไม่มีสิทธิ์บันทึกพนักงานเข้า BU นี้');
+  }
+  saveUserProfile_(idOrEmail, profile, password, true);
 }
 
 function fetchAllUsers_() {
-  return readObjects_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS).map(r => {
-    const profile = employeeToProfile_(r);
+  return readObjects_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS).map(function(row) {
+    const profile = employeeToProfile_(row);
     return Object.assign({
       id: profile.employeeId,
-      status: r.status || 'Active',
-      rawDepartmentId: String(r.departmentId || '').trim(),
-      departmentName: departmentLabel_(r.departmentId),
-      lastLoginAt: String(r.lastLoginAt || '').trim(),
-      lastSubmitAt: String(r.lastSubmitAt || '').trim()
+      status: row.status || 'Active',
+      rawDepartmentId: normalizeId_(row.departmentId),
+      rawBuId: normalizeId_(row.buId)
     }, profile);
   });
 }
 
-function updateUserTickets_(employeeId, totalTickets) {
-  const row = getEmployeeByIdOrEmail_(employeeId);
-  if (!row) throw new Error('ไม่พบพนักงานที่ต้องการปรับตั๋ว');
-  const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
-  const col = EMPLOYEE_HEADERS.indexOf('totalTickets') + 1;
-  const updatedCol = EMPLOYEE_HEADERS.indexOf('updatedAt') + 1;
-  sheet.getRange(row._row, col).setValue(Math.max(0, Number(totalTickets) || 0));
-  sheet.getRange(row._row, updatedCol).setValue(now_());
+function filterUsersForAdmin_(users, context) {
+  return users.filter(function(user) { return adminCanAccessBU_(context, user.buId); });
 }
 
 function normalizeVerificationStatus_(value) {
   const status = String(value || '').trim().toUpperCase();
-  return ['AUTO_VERIFIED', 'NEEDS_REVIEW', 'APPROVED', 'REJECTED'].indexOf(status) >= 0
-    ? status
-    : 'NEEDS_REVIEW';
+  return ['AUTO_VERIFIED', 'NEEDS_REVIEW', 'APPROVED', 'REJECTED'].indexOf(status) >= 0 ? status : 'NEEDS_REVIEW';
 }
 
 function isVerifiedStatus_(value) {
@@ -534,16 +430,11 @@ function determineInitialVerificationStatus_(steps, ocrSteps, ocrConfidence) {
   const entered = number_(steps, 0);
   const detected = number_(ocrSteps, 0);
   const confidence = number_(ocrConfidence, 0);
-  return detected > 0 && detected === entered && confidence >= CONFIG.OCR_AUTO_VERIFY_MIN_CONFIDENCE
-    ? 'AUTO_VERIFIED'
-    : 'NEEDS_REVIEW';
+  return detected > 0 && detected === entered && confidence >= CONFIG.OCR_AUTO_VERIFY_MIN_CONFIDENCE ? 'AUTO_VERIFIED' : 'NEEDS_REVIEW';
 }
 
 function safeFileName_(value) {
-  return String(value || 'evidence.jpg')
-    .replace(/[\\/:*?"<>|#%{}~&]/g, '_')
-    .replace(/\s+/g, '_')
-    .slice(0, 120);
+  return String(value || 'evidence.jpg').replace(/[\\/:*?"<>|#%{}~&]/g, '_').replace(/\s+/g, '_').slice(0, 120);
 }
 
 function getOrCreateChildFolder_(parentFolder, folderName) {
@@ -555,112 +446,175 @@ function uploadEvidence_(employeeId, log) {
   const rawData = String(log.imageData || '');
   const match = rawData.match(/^data:([^;]+);base64,(.+)$/);
   if (!match) throw new Error('ไม่พบข้อมูลรูปหลักฐานหรือรูปอยู่ในรูปแบบที่ไม่ถูกต้อง');
-
   const monthNumber = number_(log.week, 1);
   const weekNumber = number_(log.weekOfMonth, 1);
   const monthFolderName = 'Month_' + String(monthNumber).padStart(2, '0');
   const weekFolderName = 'Week_' + String(weekNumber).padStart(2, '0');
   const root = DriveApp.getFolderById(CONFIG.EVIDENCE_ROOT_FOLDER_ID);
-  const monthFolder = getOrCreateChildFolder_(root, monthFolderName);
-  const weekFolder = getOrCreateChildFolder_(monthFolder, weekFolderName);
+  const weekFolder = getOrCreateChildFolder_(getOrCreateChildFolder_(root, monthFolderName), weekFolderName);
   const bytes = Utilities.base64Decode(match[2]);
   const mimeType = String(log.imageMimeType || match[1] || 'image/jpeg');
   const timestamp = Utilities.formatDate(new Date(), CONFIG.TIMEZONE, 'yyyyMMdd_HHmmss');
   const fileName = safeFileName_(employeeId + '_' + monthFolderName + '_' + weekFolderName + '_' + timestamp + '_' + (log.imageName || 'evidence.jpg'));
-  const blob = Utilities.newBlob(bytes, mimeType, fileName);
-  const file = weekFolder.createFile(blob);
+  const file = weekFolder.createFile(Utilities.newBlob(bytes, mimeType, fileName));
   file.setDescription('Thairath Step Up evidence | Employee ' + employeeId + ' | Month ' + monthNumber + ' | Week ' + weekNumber);
-
-  return {
-    imageName: fileName,
-    imageFileId: file.getId(),
-    imageUrl: file.getUrl()
-  };
+  return { imageName: fileName, imageFileId: file.getId(), imageUrl: file.getUrl() };
 }
 
-function logRowToObject_(r) {
+function logRowToObject_(row) {
   return {
-    id: String(r.id || ''),
-    userEmail: String(r.userEmail || '').toLowerCase(),
-    employeeId: normalizeId_(r.employeeId),
-    date: String(r.date || ''),
-    steps: number_(r.steps, 0),
-    week: number_(r.week, 1),
-    weekOfMonth: r.weekOfMonth ? number_(r.weekOfMonth, undefined) : undefined,
-    imageName: String(r.imageName || ''),
-    imageFileId: String(r.imageFileId || ''),
-    imageUrl: String(r.imageUrl || ''),
+    id: String(row.id || ''),
+    userEmail: String(row.userEmail || '').toLowerCase(),
+    employeeId: normalizeId_(row.employeeId),
+    date: String(row.date || ''),
+    steps: number_(row.steps, 0),
+    week: number_(row.week, 1),
+    weekOfMonth: row.weekOfMonth ? number_(row.weekOfMonth, undefined) : undefined,
+    imageName: String(row.imageName || ''),
+    imageFileId: String(row.imageFileId || ''),
+    imageUrl: String(row.imageUrl || ''),
     imagePreview: '',
-    ocrText: String(r.ocrText || ''),
-    ocrSteps: r.ocrSteps ? number_(r.ocrSteps, undefined) : undefined,
-    ocrConfidence: number_(r.ocrConfidence, 0),
-    verificationStatus: normalizeVerificationStatus_(r.verificationStatus),
-    reviewNote: String(r.reviewNote || ''),
-    reviewedBy: String(r.reviewedBy || ''),
-    reviewedAt: String(r.reviewedAt || ''),
-    submittedAt: String(r.submittedAt || '')
+    ocrText: String(row.ocrText || ''),
+    ocrSteps: row.ocrSteps ? number_(row.ocrSteps, undefined) : undefined,
+    ocrConfidence: number_(row.ocrConfidence, 0),
+    verificationStatus: normalizeVerificationStatus_(row.verificationStatus),
+    reviewNote: String(row.reviewNote || ''),
+    reviewedBy: String(row.reviewedBy || ''),
+    reviewedAt: String(row.reviewedAt || ''),
+    submittedAt: String(row.submittedAt || ''),
+    buIdAtSubmission: normalizeId_(row.buIdAtSubmission),
+    departmentIdAtSubmission: normalizeId_(row.departmentIdAtSubmission)
   };
 }
 
-function recalculateTicketsForEmployee_(employeeId) {
+function fetchAllStepLogs_() {
+  return readObjects_(CONFIG.LOG_SHEET, LOG_HEADERS).map(logRowToObject_);
+}
+
+function findExactRows_(sheet, columnIndex, value) {
+  if (!value || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, columnIndex, sheet.getLastRow() - 1, 1)
+    .createTextFinder(String(value).trim())
+    .matchEntireCell(true)
+    .matchCase(false)
+    .findAll()
+    .map(function(cell) { return cell.getRow(); });
+}
+
+function fetchUserLogs_(userKey) {
+  const key = normalizeText_(userKey);
+  const user = findEmployeeByKey_(key);
+  const employeeId = user ? normalizeId_(user.employeeId) : String(userKey || '').trim();
+  const email = user ? normalizeId_(user.email || user.employeeId + '@thairathgroup.com') : String(userKey || '').trim();
+  const sheet = ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
+  const employeeColumn = LOG_HEADERS.indexOf('employeeId') + 1;
+  const emailColumn = LOG_HEADERS.indexOf('userEmail') + 1;
+  const rowNumbers = {};
+  findExactRows_(sheet, employeeColumn, employeeId).forEach(function(row) { rowNumbers[row] = true; });
+  findExactRows_(sheet, emailColumn, email).forEach(function(row) { rowNumbers[row] = true; });
+  return Object.keys(rowNumbers).map(Number).sort(function(a, b) { return a - b; }).map(function(rowNumber) {
+    const values = sheet.getRange(rowNumber, 1, 1, LOG_HEADERS.length).getValues()[0];
+    return logRowToObject_(rowToObject_(values, rowNumber, LOG_HEADERS));
+  });
+}
+
+function filterLogsForAdmin_(logs, context) {
+  const users = fetchAllUsers_();
+  const userMap = {};
+  users.forEach(function(user) {
+    userMap[normalizeText_(user.employeeId)] = user;
+    userMap[normalizeText_(user.email)] = user;
+  });
+  return logs.filter(function(log) {
+    const user = userMap[normalizeText_(log.employeeId)] || userMap[normalizeText_(log.userEmail)];
+    const buId = log.buIdAtSubmission || (user && user.buId) || 'UNASSIGNED';
+    return adminCanAccessBU_(context, buId);
+  });
+}
+
+function submissionWindow_(monthNumber, weekNumber) {
+  const config = CAMPAIGN_WEEKS.find(function(item) { return item.month === Number(monthNumber) && item.week === Number(weekNumber); });
+  if (!config) throw new Error('ไม่พบช่วงเวลาของสัปดาห์ที่เลือก');
+  const openAt = new Date(config.startDate + 'T00:00:00+07:00');
+  const closeAt = new Date(config.endDate + 'T23:59:59+07:00');
+  closeAt.setTime(closeAt.getTime() + CONFIG.SUBMISSION_GRACE_DAYS * 24 * 60 * 60 * 1000);
+  return { openAt: openAt, closeAt: closeAt };
+}
+
+function assertSubmissionWindowOpen_(monthNumber, weekNumber) {
+  const window = submissionWindow_(monthNumber, weekNumber);
+  const current = new Date();
+  if (current.getTime() < window.openAt.getTime()) throw new Error('สัปดาห์นี้ยังไม่เปิดให้ส่งผล');
+  if (current.getTime() > window.closeAt.getTime()) {
+    const label = Utilities.formatDate(window.closeAt, CONFIG.TIMEZONE, 'dd/MM/yyyy HH:mm');
+    throw new Error('เกินกำหนดส่งผลแล้ว ปิดรับเมื่อ ' + label + ' น.');
+  }
+}
+
+function recalculateTicketsForEmployee_(employeeId, logs) {
   const cleanId = normalizeId_(employeeId);
   if (!cleanId) return 0;
-  const qualifyingCount = fetchAllStepLogs_().filter(log =>
-    normalizeId_(log.employeeId) === cleanId &&
-    isVerifiedStatus_(log.verificationStatus) &&
-    number_(log.steps, 0) >= CONFIG.WEEKLY_TARGET
-  ).length;
-
-  const row = getEmployeeByIdOrEmail_(cleanId);
+  const sourceLogs = logs || fetchAllStepLogs_();
+  const count = sourceLogs.filter(function(log) {
+    return normalizeId_(log.employeeId) === cleanId && isVerifiedStatus_(log.verificationStatus) && number_(log.steps, 0) >= CONFIG.WEEKLY_TARGET;
+  }).length;
+  const row = findEmployeeByKey_(cleanId);
   if (row) {
     const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
-    const ticketColumn = EMPLOYEE_HEADERS.indexOf('totalTickets') + 1;
-    const updatedColumn = EMPLOYEE_HEADERS.indexOf('updatedAt') + 1;
-    sheet.getRange(row._row, ticketColumn).setValue(qualifyingCount);
-    sheet.getRange(row._row, updatedColumn).setValue(now_());
+    sheet.getRange(row._row, EMPLOYEE_HEADERS.indexOf('totalTickets') + 1).setValue(count);
+    sheet.getRange(row._row, EMPLOYEE_HEADERS.indexOf('updatedAt') + 1).setValue(now_());
   }
-  return qualifyingCount;
+  return count;
 }
 
 function recalculateAllVerifiedTickets() {
   setup_();
-  fetchAllUsers_().forEach(user => recalculateTicketsForEmployee_(user.employeeId));
+  const users = fetchAllUsers_();
+  const logs = fetchAllStepLogs_();
+  const counts = {};
+  logs.forEach(function(log) {
+    if (isVerifiedStatus_(log.verificationStatus) && number_(log.steps, 0) >= CONFIG.WEEKLY_TARGET) {
+      const key = normalizeId_(log.employeeId);
+      counts[key] = (counts[key] || 0) + 1;
+    }
+  });
+  const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
+  if (users.length) {
+    const values = users.map(function(user) { return [counts[normalizeId_(user.employeeId)] || 0]; });
+    sheet.getRange(2, EMPLOYEE_HEADERS.indexOf('totalTickets') + 1, values.length, 1).setValues(values);
+  }
 }
 
 function saveUserLog_(userKey, log) {
   if (!log) throw new Error('Missing log payload');
-  const user = getEmployeeByIdOrEmail_(userKey);
-  if (!user) throw new Error('ไม่พบผู้ใช้งานสำหรับบันทึกก้าว');
+  const user = findEmployeeByKey_(userKey);
+  if (!user) throw new Error('ไม่พบผู้ใช้งานสำหรับบันทึกค่าเฉลี่ยก้าว');
+  const monthNumber = number_(log.week, 1);
+  const weekOfMonth = number_(log.weekOfMonth, 0);
+  const enteredSteps = number_(log.steps, 0);
+  if (enteredSteps <= 0) throw new Error('ค่าเฉลี่ยก้าวต้องมากกว่า 0');
+  if (!weekOfMonth) throw new Error('กรุณาระบุสัปดาห์ของเดือน');
+  assertSubmissionWindowOpen_(monthNumber, weekOfMonth);
 
   const sheet = ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
   const logId = String(log.id || Utilities.getUuid()).trim();
-  const existing = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === logId);
-  const monthNumber = number_(log.week, 1);
-  const weekOfMonth = number_(log.weekOfMonth, 0);
+  const existing = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, function(row) { return String(row.id) === logId; });
   const employeeId = normalizeId_(user.employeeId);
-  const enteredSteps = number_(log.steps, 0);
-  if (enteredSteps <= 0) throw new Error('จำนวนก้าวต้องมากกว่า 0');
-  if (!weekOfMonth) throw new Error('กรุณาระบุสัปดาห์ของเดือน');
-
-  const duplicate = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r =>
-    String(r.id) !== logId &&
-    normalizeText_(r.employeeId) === normalizeText_(employeeId) &&
-    Number(r.week) === Number(monthNumber) &&
-    Number(r.weekOfMonth) === Number(weekOfMonth)
-  );
-  if (duplicate) {
-    throw new Error('พนักงานรายนี้ส่งข้อมูลของเดือนและสัปดาห์นี้แล้ว กรุณาลบรายการเดิมก่อนบันทึกใหม่');
-  }
+  const duplicate = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, function(row) {
+    return String(row.id) !== logId && normalizeText_(row.employeeId) === normalizeText_(employeeId) &&
+      Number(row.week) === monthNumber && Number(row.weekOfMonth) === weekOfMonth;
+  });
+  if (duplicate) throw new Error('พนักงานรายนี้ส่งผลของเดือนและสัปดาห์นี้แล้ว กรุณาติดต่อ Admin หากต้องการแก้ไข');
 
   const evidence = existing && existing.imageFileId
     ? { imageName: existing.imageName, imageFileId: existing.imageFileId, imageUrl: existing.imageUrl }
     : uploadEvidence_(employeeId, log);
   const verificationStatus = determineInitialVerificationStatus_(enteredSteps, log.ocrSteps, log.ocrConfidence);
-  const now = now_();
-  const submittedAt = log.submittedAt || now;
+  const timestamp = now_();
+  const submittedAt = log.submittedAt || timestamp;
   const rowValues = [
     logId,
-    String(user.email || (user.employeeId + '@thairathgroup.com')).toLowerCase(),
+    String(user.email || employeeId + '@thairathgroup.com').toLowerCase(),
     employeeId,
     log.date || '',
     enteredSteps,
@@ -668,8 +622,8 @@ function saveUserLog_(userKey, log) {
     weekOfMonth,
     evidence.imageName,
     submittedAt,
-    existing ? existing.createdAt : now,
-    now,
+    existing ? existing.createdAt : timestamp,
+    timestamp,
     evidence.imageFileId,
     evidence.imageUrl,
     String(log.ocrText || '').slice(0, 45000),
@@ -677,115 +631,159 @@ function saveUserLog_(userKey, log) {
     number_(log.ocrConfidence, 0),
     verificationStatus,
     '',
-    verificationStatus === 'AUTO_VERIFIED' ? 'Tesseract.js OCR' : '',
-    verificationStatus === 'AUTO_VERIFIED' ? now : ''
+    verificationStatus === 'AUTO_VERIFIED' ? 'ระบบ OCR' : '',
+    verificationStatus === 'AUTO_VERIFIED' ? timestamp : '',
+    normalizeId_(user.buId) || 'UNASSIGNED',
+    normalizeId_(user.departmentId) || 'UNASSIGNED'
   ];
-
-  if (existing) {
-    sheet.getRange(existing._row, 1, 1, LOG_HEADERS.length).setValues([rowValues]);
-  } else {
-    sheet.appendRow(rowValues);
-  }
+  if (existing) sheet.getRange(existing._row, 1, 1, LOG_HEADERS.length).setValues([rowValues]);
+  else sheet.appendRow(rowValues);
 
   updateEmployeeTimestamp_(employeeId, 'lastSubmitAt', submittedAt);
   recalculateTicketsForEmployee_(employeeId);
-  return logRowToObject_(findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === logId));
+  invalidateLeaderboardCache_();
+  return logRowToObject_(findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, function(row) { return String(row.id) === logId; }));
 }
 
-function reviewUserLog_(logId, verificationStatus, reviewNote, reviewedBy) {
+function getLogBU_(row) {
+  if (row.buIdAtSubmission) return normalizeId_(row.buIdAtSubmission);
+  const employee = findEmployeeByKey_(row.employeeId || row.userEmail);
+  return employee ? normalizeId_(employee.buId) : 'UNASSIGNED';
+}
+
+function reviewUserLog_(logId, verificationStatus, reviewNote, adminContext) {
   const nextStatus = normalizeVerificationStatus_(verificationStatus);
-  if (nextStatus !== 'APPROVED' && nextStatus !== 'REJECTED') {
-    throw new Error('Admin สามารถเลือกได้เฉพาะ APPROVED หรือ REJECTED');
-  }
-
+  if (nextStatus !== 'APPROVED' && nextStatus !== 'REJECTED') throw new Error('Admin สามารถเลือกได้เฉพาะ APPROVED หรือ REJECTED');
   const sheet = ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
-  const row = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === String(logId));
+  const row = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, function(item) { return String(item.id) === String(logId); });
   if (!row) throw new Error('ไม่พบรายการหลักฐานที่ต้องการตรวจ');
-
-  const now = now_();
+  if (!adminCanAccessBU_(adminContext, getLogBU_(row))) throw new Error('ไม่มีสิทธิ์ตรวจหลักฐานของ BU นี้');
+  const timestamp = now_();
   sheet.getRange(row._row, LOG_HEADERS.indexOf('verificationStatus') + 1).setValue(nextStatus);
   sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewNote') + 1).setValue(String(reviewNote || '').slice(0, 500));
-  sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewedBy') + 1).setValue(String(reviewedBy || 'Admin'));
-  sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewedAt') + 1).setValue(now);
-  sheet.getRange(row._row, LOG_HEADERS.indexOf('updatedAt') + 1).setValue(now);
-
+  sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewedBy') + 1).setValue(String(adminContext.displayName || 'Admin'));
+  sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewedAt') + 1).setValue(timestamp);
+  sheet.getRange(row._row, LOG_HEADERS.indexOf('updatedAt') + 1).setValue(timestamp);
   recalculateTicketsForEmployee_(row.employeeId);
-  return logRowToObject_(findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === String(logId)));
+  invalidateLeaderboardCache_();
+  return logRowToObject_(findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, function(item) { return String(item.id) === String(logId); }));
 }
 
-function fetchAllStepLogs_() {
-  return readObjects_(CONFIG.LOG_SHEET, LOG_HEADERS).map(logRowToObject_);
+function recalculateLastSubmitAt_(employeeId) {
+  const latest = fetchAllStepLogs_().filter(function(log) { return normalizeText_(log.employeeId) === normalizeText_(employeeId); })
+    .sort(function(a, b) { return String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')); })[0];
+  updateEmployeeTimestamp_(employeeId, 'lastSubmitAt', latest ? latest.submittedAt : '');
 }
 
-function fetchUserLogs_(userKey) {
-  const key = normalizeText_(userKey);
-  const user = getEmployeeByIdOrEmail_(key);
-  const employeeId = user ? normalizeText_(user.employeeId) : key;
-  const email = user ? normalizeText_(user.email || user.employeeId + '@thairathgroup.com') : key;
-
-  return fetchAllStepLogs_().filter(log =>
-    normalizeText_(log.employeeId) === employeeId || normalizeText_(log.userEmail) === email
-  );
-}
-
-function deleteUserLog_(logId) {
+function deleteUserLog_(logId, adminContext) {
   const sheet = ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
-  const row = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, r => String(r.id) === String(logId));
+  const row = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, function(item) { return String(item.id) === String(logId); });
   if (!row) return;
+  if (!adminCanAccessBU_(adminContext, getLogBU_(row))) throw new Error('ไม่มีสิทธิ์ลบหลักฐานของ BU นี้');
   const employeeId = normalizeId_(row.employeeId);
-  const imageFileId = String(row.imageFileId || '').trim();
+  const imageFileId = normalizeId_(row.imageFileId);
   sheet.deleteRow(row._row);
-
   if (imageFileId) {
-    try {
-      DriveApp.getFileById(imageFileId).setTrashed(true);
-    } catch (err) {
-      console.warn('Could not move evidence file to trash: ' + err);
-    }
+    try { DriveApp.getFileById(imageFileId).setTrashed(true); } catch (err) { console.warn(err); }
   }
-
   if (employeeId) {
     recalculateLastSubmitAt_(employeeId);
     recalculateTicketsForEmployee_(employeeId);
+    invalidateLeaderboardCache_();
   }
 }
 
-function calculateLeaderboard_(currentWeek) {
-  const users = fetchAllUsers_();
-  const logs = fetchAllStepLogs_().filter(log =>
-    Number(log.week) === Number(currentWeek) && isVerifiedStatus_(log.verificationStatus)
-  );
-  const userMap = {};
+function leaderboardCacheKey_(currentMonth) { return 'leaderboard_v24_' + Number(currentMonth || 1); }
 
-  users.forEach(user => {
-    userMap[normalizeText_(user.employeeId)] = user;
-    userMap[normalizeText_(user.email)] = user;
+function invalidateLeaderboardCache_() {
+  const cache = CacheService.getScriptCache();
+  CAMPAIGN_WEEKS.forEach(function(item) { cache.remove(leaderboardCacheKey_(item.month)); });
+}
+
+function calculateLeaderboard_(currentMonth, forceRefresh) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = leaderboardCacheKey_(currentMonth);
+  if (!forceRefresh) {
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try { return JSON.parse(cached); } catch (err) { console.warn('Leaderboard cache parse failed: ' + err); }
+    }
+  }
+  const users = fetchAllUsers_().filter(function(user) { return normalizeText_(user.status || 'Active') === 'active'; });
+  const logs = fetchAllStepLogs_().filter(function(log) {
+    return Number(log.week) === Number(currentMonth) && isVerifiedStatus_(log.verificationStatus);
+  });
+  const usersByKey = {};
+  users.forEach(function(user) {
+    usersByKey[normalizeText_(user.employeeId)] = user;
+    usersByKey[normalizeText_(user.email)] = user;
   });
 
-  const departmentCatalog = getDepartmentCatalog_(users);
-
-  return departmentCatalog.map(dept => {
-    const deptUsers = users.filter(user => sameDepartment_(user.departmentId, dept.id));
-    const deptUserCount = deptUsers.length || 1;
-    const deptLogs = logs.filter(log => {
-      const user = userMap[normalizeText_(log.employeeId)] || userMap[normalizeText_(log.userEmail)];
-      return user && sameDepartment_(user.departmentId, dept.id);
-    });
-
-    const totalSteps = deptLogs.reduce((sum, log) => sum + number_(log.steps, 0), 0);
-    const uniqueParticipants = {};
-    deptLogs.forEach(log => uniqueParticipants[normalizeText_(log.employeeId || log.userEmail)] = true);
-    const participantCount = Object.keys(uniqueParticipants).length;
-    const averageStepsPerPerson = totalSteps > 0
-      ? Math.round(totalSteps / Math.max(1, participantCount))
-      : 0;
-    const participationRate = deptUsers.length > 0
-      ? Math.round((participantCount / deptUserCount) * 100)
-      : 0;
-
-    return Object.assign({}, dept, {
-      averageStepsPerPerson: averageStepsPerPerson,
-      participationRate: Math.min(100, participationRate)
-    });
+  // First average each employee's verified weekly averages. This prevents frequent submitters receiving extra weight.
+  const employeeValues = {};
+  logs.forEach(function(log) {
+    const key = normalizeText_(log.employeeId || log.userEmail);
+    if (!employeeValues[key]) employeeValues[key] = [];
+    employeeValues[key].push(number_(log.steps, 0));
   });
+  const employeeAverages = {};
+  Object.keys(employeeValues).forEach(function(key) { employeeAverages[key] = average_(employeeValues[key]); });
+
+  const buIds = {};
+  const departmentKeys = {};
+  users.forEach(function(user) {
+    const buId = normalizeId_(user.buId) || 'UNASSIGNED';
+    const departmentId = normalizeId_(user.departmentId) || 'UNASSIGNED';
+    buIds[buId] = true;
+    departmentKeys[buId + '::' + departmentId] = { buId: buId, departmentId: departmentId };
+  });
+
+  const businessUnits = Object.keys(buIds).map(function(buId) {
+    const members = users.filter(function(user) { return normalizeText_(user.buId) === normalizeText_(buId); });
+    const participantAverages = members.map(function(user) {
+      return employeeAverages[normalizeText_(user.employeeId)] || employeeAverages[normalizeText_(user.email)];
+    }).filter(function(value) { return Number.isFinite(value) && value > 0; });
+    return {
+      id: buId,
+      nameTh: buId,
+      nameEn: buId,
+      participationRate: members.length ? Math.round(participantAverages.length / members.length * 100) : 0,
+      averageStepsPerPerson: average_(participantAverages),
+      memberCount: members.length,
+      participantCount: participantAverages.length,
+      status: 'stable',
+      statusText: 'ข้อมูลจากระบบ'
+    };
+  }).sort(function(a, b) { return b.averageStepsPerPerson - a.averageStepsPerPerson; });
+
+  const departments = Object.keys(departmentKeys).map(function(key) {
+    const item = departmentKeys[key];
+    const members = users.filter(function(user) {
+      return normalizeText_(user.buId) === normalizeText_(item.buId) && normalizeText_(user.departmentId) === normalizeText_(item.departmentId);
+    });
+    const participantAverages = members.map(function(user) {
+      return employeeAverages[normalizeText_(user.employeeId)] || employeeAverages[normalizeText_(user.email)];
+    }).filter(function(value) { return Number.isFinite(value) && value > 0; });
+    return {
+      id: item.departmentId,
+      buId: item.buId,
+      nameTh: item.departmentId,
+      nameEn: item.departmentId,
+      participationRate: members.length ? Math.round(participantAverages.length / members.length * 100) : 0,
+      averageStepsPerPerson: average_(participantAverages),
+      memberCount: members.length,
+      participantCount: participantAverages.length,
+      status: 'stable',
+      statusText: 'ข้อมูลจากระบบ'
+    };
+  }).sort(function(a, b) { return b.averageStepsPerPerson - a.averageStepsPerPerson; });
+
+  const result = { businessUnits: businessUnits, departments: departments, generatedAt: now_() };
+  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch (err) { console.warn('Leaderboard cache skipped: ' + err); }
+  return result;
+}
+
+function authorizeDriveAccess() {
+  const folder = DriveApp.getFolderById(CONFIG.EVIDENCE_ROOT_FOLDER_ID);
+  Logger.log('Drive authorized: ' + folder.getName());
 }

@@ -68,3 +68,42 @@ body {
 .btn {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+.field-input {
+  width: 100%;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 0.875rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #0f172a;
+  outline: none;
+}
+.field-input:focus {
+  border-color: #00914e;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(0, 145, 78, 0.08);
+}
+
+.filter-input {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.action-secondary, .action-approve, .action-reject {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.action-secondary { background: #f1f5f9; color: #475569; }
+.action-approve { background: #00914e; color: white; }
+.action-reject { background: #e11d48; color: white; }

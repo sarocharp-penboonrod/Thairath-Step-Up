@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { X, History, Trash2, Calendar, Award, ExternalLink, Sliders } from 'lucide-react';
+import { X, History } from 'lucide-react';
 import { StepLog, WeekConfig, isVerifiedStatus } from '../types';
 
 interface HistoryDrawerProps {
@@ -7,15 +7,13 @@ interface HistoryDrawerProps {
   onClose: () => void;
   stepLogs: StepLog[];
   weeks: WeekConfig[];
-  onDeleteLog: (id: string) => void;
 }
 
 export default function HistoryDrawer({
   isOpen,
   onClose,
   stepLogs,
-  weeks,
-  onDeleteLog
+  weeks
 }: HistoryDrawerProps) {
   
   if (!isOpen) return null;
@@ -33,7 +31,7 @@ export default function HistoryDrawer({
         <div className="p-5 border-b border-gray-150 flex items-center justify-between bg-white sticky top-0 z-15">
           <div className="flex items-center gap-2 text-[#008148]">
             <History className="w-5 h-5 stroke-[2.5px]" />
-            <h3 className="font-extrabold text-lg text-black">ประวัติการส่งรายงานก้าวสะสม</h3>
+            <h3 className="font-extrabold text-lg text-black">ประวัติการส่งค่าเฉลี่ยก้าว</h3>
           </div>
           <button 
             id="close-history-btn"
@@ -49,13 +47,13 @@ export default function HistoryDrawer({
           {sortedLogs.length === 0 ? (
             <div className="py-20 text-center text-gray-400 font-medium space-y-2">
               <History className="w-12 h-12 text-gray-300 mx-auto" />
-              <p className="text-sm">ยังไม่มีประวัติการส่งรายงานหน้าจอก้าวเดิน</p>
-              <p className="text-xs text-gray-400">กรุณาบันทึกข้อมูลก้าวที่เมนู "ส่งผลก้าว" ก่อน</p>
+              <p className="text-sm">ยังไม่มีประวัติการส่งค่าเฉลี่ยก้าว</p>
+              <p className="text-xs text-gray-400">กรุณาส่งค่าเฉลี่ยก้าวที่เมนู “ส่งผลก้าว” ก่อน</p>
             </div>
           ) : (
             <div className="space-y-4">
               <p className="text-xs text-[#344054] font-semibold">
-                * รายการทั้งหมดรวมสถานะรอตรวจและไม่ผ่าน Dashboard/Leaderboard/คูปองจะใช้เฉพาะรายการที่ผ่านตรวจ
+                * Dashboard, Leaderboard และคูปอง ใช้เฉพาะรายการที่ผ่านการตรวจแล้ว
               </p>
               
               <div className="divide-y divide-gray-100 border border-[#edf2f7] rounded-xl overflow-hidden bg-white">
@@ -94,36 +92,29 @@ export default function HistoryDrawer({
                             {new Date(log.date).toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                           </p>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[10px] font-bold bg-[#e6f5ee] text-[#008148] px-2 py-0.5 rounded-md">
+                            <span className="text-xs font-bold bg-[#e6f5ee] text-[#008148] px-2 py-0.5 rounded-md">
                               {mText} • {wText}
                             </span>
-                            <span className="text-[10px] text-[#344054] font-medium max-w-[130px] truncate" title={log.imageName}>
+                            <span className="text-xs text-[#344054] font-medium max-w-[130px] truncate" title={log.imageName}>
                               📸 {log.imageName}
                             </span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isVerifiedStatus(log.verificationStatus) ? 'bg-emerald-50 text-emerald-700' : log.verificationStatus === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${isVerifiedStatus(log.verificationStatus) ? 'bg-emerald-50 text-emerald-700' : log.verificationStatus === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
                               {isVerifiedStatus(log.verificationStatus) ? 'ผ่านตรวจ' : log.verificationStatus === 'REJECTED' ? 'ไม่ผ่าน' : 'รอตรวจ'}
                             </span>
-                            {log.imageUrl && <a href={log.imageUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="text-[10px] font-bold text-blue-600 hover:underline">เปิดหลักฐาน</a>}
+                            {log.imageUrl && <a href={log.imageUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="text-xs font-bold text-blue-600 hover:underline">เปิดหลักฐาน</a>}
                           </div>
                         </div>
                       </div>
 
-                      {/* Right: Steps & Delete Action */}
+                      {/* Right: Weekly average */}
                       <div className="flex items-center justify-between sm:justify-end gap-6 border-t sm:border-0 pt-3 sm:pt-0">
                         <div className="text-left sm:text-right">
-                          <span className="text-[10px] font-bold text-gray-400 block uppercase">ปริมาณก้าวส่งผล</span>
+                          <span className="text-xs font-bold text-gray-400 block uppercase">ค่าเฉลี่ยก้าวต่อวัน</span>
                           <span className="text-lg font-black text-[#008148]">
-                            {log.steps.toLocaleString()} <span className="text-xs font-normal text-gray-500">ก้าว</span>
+                            {log.steps.toLocaleString()} <span className="text-xs font-normal text-gray-500">ก้าว/วัน</span>
                           </span>
                         </div>
 
-                        <button
-                          onClick={() => onDeleteLog(log.id)}
-                          className="p-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 rounded-xl transition-all cursor-pointer"
-                          title="ลบรายงานนี้"
-                        >
-                          <Trash2 className="w-4.5 h-4.5" />
-                        </button>
                       </div>
 
                     </div>
@@ -136,8 +127,8 @@ export default function HistoryDrawer({
 
         {/* Footer */}
         <div className="p-4 bg-[#F2F4F7] border-t border-gray-150 flex items-center justify-between">
-          <span className="text-[10px] text-[#344054] font-semibold">
-            Thairath Logistics Health System
+          <span className="text-xs text-[#344054] font-semibold">
+            หากส่งข้อมูลผิด กรุณาติดต่อผู้ดูแลระบบ
           </span>
           <button
             onClick={onClose}
