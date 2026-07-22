@@ -149,7 +149,7 @@ export default function LoginView({ currentMonth, onLoginSuccess }: LoginViewPro
                   type="text"
                   value={employeeId}
                   onChange={(event) => setEmployeeId(isAdminLogin ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 6))}
-                  className="field-input pl-12"
+                  className="field-input field-input-leading"
                   autoComplete="username"
                   required
                 />
@@ -159,11 +159,11 @@ export default function LoginView({ currentMonth, onLoginSuccess }: LoginViewPro
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(event) => setPassword(isAdminLogin ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 6))}
-                  className="field-input pl-12 pr-12 tracking-widest"
+                  className="field-input field-input-leading field-input-trailing tracking-widest"
                   autoComplete="current-password"
                   required
                 />
-                <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 cursor-pointer">
+                <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute inset-y-0 right-0 z-10 w-12 flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer" aria-label={showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}>
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </Field>
@@ -206,7 +206,7 @@ function Field({ label, icon, children }: { label: string; icon: React.ReactNode
     <div>
       <label className="block text-sm font-bold text-slate-600 mb-2">{label}</label>
       <div className="relative">
-        <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">{icon}</span>
+        <span className="absolute inset-y-0 left-0 z-10 w-12 flex items-center justify-center text-slate-400 pointer-events-none">{icon}</span>
         {children}
       </div>
     </div>
