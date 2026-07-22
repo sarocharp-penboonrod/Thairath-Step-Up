@@ -80,6 +80,17 @@ body {
   color: #0f172a;
   outline: none;
 }
+
+/* Keep input text clear of the leading field icon and the password visibility button.
+   These rules come after the base padding so they are not overridden by .field-input. */
+.field-input.field-input-leading {
+  padding-left: 3.25rem;
+}
+
+.field-input.field-input-trailing {
+  padding-right: 3.25rem;
+}
+
 .field-input:focus {
   border-color: #00914e;
   background: white;
