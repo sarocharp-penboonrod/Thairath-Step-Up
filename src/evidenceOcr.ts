@@ -9,7 +9,8 @@ export interface EvidenceOcrResult {
   alternatives: number[];
 }
 
-type OcrVariantName = 'original' | 'high-contrast' | 'binary';
+type OcrInput = string | Blob;
+type OcrVariantName = 'full-original' | 'focus-contrast' | 'focus-binary';
 
 interface OcrVariant {
   name: OcrVariantName;
@@ -41,8 +42,17 @@ interface OcrPassResult {
   candidates: NumericCandidate[];
 }
 
-const OCR_PASS_COUNT = 3;
-const MAX_OCR_SIDE = 2000;
+interface LoadedDrawable {
+  drawable: CanvasImageSource;
+  width: number;
+  height: number;
+  release: () => void;
+}
+
+const MAX_OCR_SIDE = 3200;
+const MAX_OCR_PIXELS = 5_000_000;
+const MAX_FOCUS_PIXELS = 3_400_000;
+const MIN_OCR_SHORT_SIDE = 1000;
 const MIN_VALID_STEPS = 100;
 const MAX_VALID_STEPS = 500000;
 
@@ -51,15 +61,6 @@ const NEGATIVE_CONTEXT = /\b(km|kilomet(?:er|re)s?|kcal|calories?|cal|distance|m
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function loadImage(source: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('ไม่สามารถอ่านภาพสำหรับ OCR ได้'));
-    image.src = source;
-  });
 }
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
@@ -75,25 +76,145 @@ function getContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   return context;
 }
 
-function createScaledCanvas(image: HTMLImageElement): HTMLCanvasElement {
-  const longestSide = Math.max(image.naturalWidth, image.naturalHeight);
-  const scale = longestSide > MAX_OCR_SIDE
-    ? MAX_OCR_SIDE / longestSide
-    : longestSide < 1100
-      ? Math.min(1.8, 1400 / Math.max(1, longestSide))
-      : 1;
+function loadHtmlImage(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('ไม่สามารถอ่านภาพสำหรับ OCR ได้'));
+    image.src = source;
+  });
+}
 
-  const canvas = createCanvas(image.naturalWidth * scale, image.naturalHeight * scale);
+async function loadDrawable(source: OcrInput): Promise<LoadedDrawable> {
+  if (typeof source !== 'string' && typeof createImageBitmap === 'function') {
+    try {
+      // createImageBitmap respects EXIF orientation on mobile browsers that support it.
+      const bitmap = await createImageBitmap(source, {
+        imageOrientation: 'from-image'
+      } as ImageBitmapOptions);
+      return {
+        drawable: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        release: () => bitmap.close()
+      };
+    } catch (error) {
+      console.warn('createImageBitmap fallback:', error);
+    }
+  }
+
+  const objectUrl = typeof source === 'string' ? '' : URL.createObjectURL(source);
+  try {
+    const image = await loadHtmlImage(typeof source === 'string' ? source : objectUrl);
+    return {
+      drawable: image,
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      release: () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      }
+    };
+  } catch (error) {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+}
+
+function calculateScale(
+  width: number,
+  height: number,
+  options: {
+    maxSide: number;
+    maxPixels: number;
+    minimumShortSide?: number;
+    allowUpscale?: boolean;
+  }
+): number {
+  const longestSide = Math.max(width, height);
+  const shortestSide = Math.max(1, Math.min(width, height));
+  let scale = 1;
+
+  if (options.allowUpscale && options.minimumShortSide && shortestSide < options.minimumShortSide) {
+    scale = Math.min(2, options.minimumShortSide / shortestSide);
+  }
+
+  scale = Math.min(scale, options.maxSide / Math.max(1, longestSide));
+  scale = Math.min(scale, Math.sqrt(options.maxPixels / Math.max(1, width * height)));
+  return Math.max(0.1, scale);
+}
+
+function drawScaled(
+  drawable: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  scale: number
+): HTMLCanvasElement {
+  const canvas = createCanvas(sourceWidth * scale, sourceHeight * scale);
   const context = getContext(canvas);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  context.drawImage(drawable, 0, 0, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
   return canvas;
+}
+
+async function createOcrBaseCanvas(source: OcrInput): Promise<HTMLCanvasElement> {
+  const loaded = await loadDrawable(source);
+  try {
+    const scale = calculateScale(loaded.width, loaded.height, {
+      maxSide: MAX_OCR_SIDE,
+      maxPixels: MAX_OCR_PIXELS,
+      minimumShortSide: MIN_OCR_SHORT_SIDE,
+      allowUpscale: true
+    });
+    return drawScaled(loaded.drawable, loaded.width, loaded.height, scale);
+  } finally {
+    loaded.release();
+  }
 }
 
 function cloneCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
   const canvas = createCanvas(source.width, source.height);
   getContext(canvas).drawImage(source, 0, 0);
+  return canvas;
+}
+
+function createFocusCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
+  const portrait = source.height / Math.max(1, source.width) >= 1.25;
+
+  // Health-app screenshots generally place the primary step number in the upper/centre area.
+  // Keep the crop deliberately broad so Samsung Health, Apple Health and other layouts still fit.
+  const xRatio = portrait ? 0.025 : 0.035;
+  const yRatio = portrait ? 0.045 : 0.035;
+  const widthRatio = portrait ? 0.95 : 0.93;
+  const heightRatio = portrait ? 0.70 : 0.82;
+
+  const sourceX = Math.round(source.width * xRatio);
+  const sourceY = Math.round(source.height * yRatio);
+  const sourceCropWidth = Math.max(1, Math.round(source.width * widthRatio));
+  const sourceCropHeight = Math.max(1, Math.round(source.height * heightRatio));
+
+  const focusScale = calculateScale(sourceCropWidth, sourceCropHeight, {
+    maxSide: 2800,
+    maxPixels: MAX_FOCUS_PIXELS,
+    minimumShortSide: portrait ? 1100 : 950,
+    allowUpscale: true
+  });
+
+  const canvas = createCanvas(sourceCropWidth * focusScale, sourceCropHeight * focusScale);
+  const context = getContext(canvas);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(
+    source,
+    sourceX,
+    sourceY,
+    Math.min(sourceCropWidth, source.width - sourceX),
+    Math.min(sourceCropHeight, source.height - sourceY),
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
   return canvas;
 }
 
@@ -105,7 +226,7 @@ function createHighContrastCanvas(source: HTMLCanvasElement): HTMLCanvasElement 
 
   for (let index = 0; index < pixels.length; index += 4) {
     const luminance = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2];
-    const contrasted = clamp((luminance - 128) * 1.65 + 128, 0, 255);
+    const contrasted = clamp((luminance - 128) * 1.72 + 128, 0, 255);
     pixels[index] = contrasted;
     pixels[index + 1] = contrasted;
     pixels[index + 2] = contrasted;
@@ -177,31 +298,35 @@ function createBinaryCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
   return canvas;
 }
 
-async function createOcrVariants(source: string): Promise<OcrVariant[]> {
-  const image = await loadImage(source);
-  const original = createScaledCanvas(image);
-  const highContrast = createHighContrastCanvas(original);
-  const binary = createBinaryCanvas(highContrast);
+async function createOcrVariants(source: OcrInput): Promise<OcrVariant[]> {
+  const fullOriginal = await createOcrBaseCanvas(source);
+  const focus = createFocusCanvas(fullOriginal);
+  const focusContrast = createHighContrastCanvas(focus);
+  const focusBinary = createBinaryCanvas(focusContrast);
+
+  // Release the intermediate crop once the derived canvases are ready.
+  focus.width = 1;
+  focus.height = 1;
 
   return [
     {
-      name: 'original',
-      label: 'ภาพต้นฉบับ',
-      image: original,
+      name: 'full-original',
+      label: 'ภาพเต็มความละเอียดสูง',
+      image: fullOriginal,
       psm: PSM.SPARSE_TEXT,
       whitelist: '0123456789OoIl|,.:/%- abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
     },
     {
-      name: 'high-contrast',
-      label: 'ภาพเพิ่มความคมชัด',
-      image: highContrast,
+      name: 'focus-contrast',
+      label: 'ช่วงตัวเลขหลัก · เพิ่มความคมชัด',
+      image: focusContrast,
       psm: PSM.SPARSE_TEXT,
-      whitelist: '0123456789OoIl|,.:/%- '
+      whitelist: '0123456789OoIl|,.:/%- abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
     },
     {
-      name: 'binary',
-      label: 'ภาพขาวดำ',
-      image: binary,
+      name: 'focus-binary',
+      label: 'ช่วงตัวเลขหลัก · ขาวดำ',
+      image: focusBinary,
       psm: PSM.SPARSE_TEXT,
       whitelist: '0123456789OoIl|,.:/%- '
     }
@@ -242,7 +367,7 @@ function numericFragments(text: string): string[] {
   return normalized.match(/\d[\d,.\s:/%|-]{1,12}\d|\d{3,7}/g) || [];
 }
 
-function scoreCandidate(candidate: Omit<NumericCandidate, 'score'>): number {
+function scoreCandidate(candidate: Omit<NumericCandidate, 'score'>, expectedSteps?: number): number {
   const widthRatio = Math.sqrt(Math.max(1, candidate.area)) / Math.max(1, candidate.imageWidth);
   const heightRatio = Math.sqrt(Math.max(1, candidate.area)) / Math.max(1, candidate.imageHeight);
   const visualSizeScore = clamp((widthRatio + heightRatio) * 145, 0, 48);
@@ -251,7 +376,7 @@ function scoreCandidate(candidate: Omit<NumericCandidate, 'score'>): number {
   const normalizedX = candidate.centerX / Math.max(1, candidate.imageWidth);
   const normalizedY = candidate.centerY / Math.max(1, candidate.imageHeight);
   const horizontalCenterScore = clamp(1 - Math.abs(normalizedX - 0.5) / 0.5, 0, 1) * 12;
-  const verticalScore = normalizedY >= 0.08 && normalizedY <= 0.72 ? 8 : normalizedY <= 0.9 ? 3 : 0;
+  const verticalScore = normalizedY >= 0.06 && normalizedY <= 0.78 ? 9 : normalizedY <= 0.92 ? 3 : 0;
 
   const digits = String(candidate.value).length;
   const digitScore = digits >= 4 && digits <= 6 ? 8 : 3;
@@ -259,7 +384,10 @@ function scoreCandidate(candidate: Omit<NumericCandidate, 'score'>): number {
   const positiveContextScore = POSITIVE_CONTEXT.test(context) ? 18 : 0;
   const negativeContextPenalty = NEGATIVE_CONTEXT.test(context) ? 24 : 0;
 
-  return visualSizeScore + confidenceScore + horizontalCenterScore + verticalScore + digitScore + positiveContextScore - negativeContextPenalty;
+  // This does not invent a number. It only promotes the exact value when OCR genuinely found it in the image.
+  const expectedMatchScore = expectedSteps && candidate.value === expectedSteps ? 34 : 0;
+
+  return visualSizeScore + confidenceScore + horizontalCenterScore + verticalScore + digitScore + positiveContextScore + expectedMatchScore - negativeContextPenalty;
 }
 
 function createCandidate(
@@ -270,7 +398,8 @@ function createCandidate(
   imageHeight: number,
   sourceText: string,
   contextText: string,
-  passName: OcrVariantName
+  passName: OcrVariantName,
+  expectedSteps?: number
 ): NumericCandidate {
   const width = Math.max(1, bbox.x1 - bbox.x0);
   const height = Math.max(1, bbox.y1 - bbox.y0);
@@ -287,7 +416,7 @@ function createCandidate(
     passName
   };
 
-  return { ...base, score: scoreCandidate(base) };
+  return { ...base, score: scoreCandidate(base, expectedSteps) };
 }
 
 function estimateFragmentBox(line: Tesseract.Line, fragment: string): Tesseract.Bbox {
@@ -309,7 +438,8 @@ function collectCandidates(
   blocks: Tesseract.Block[] | null,
   imageWidth: number,
   imageHeight: number,
-  passName: OcrVariantName
+  passName: OcrVariantName,
+  expectedSteps?: number
 ): NumericCandidate[] {
   if (!blocks) return [];
   const candidates: NumericCandidate[] = [];
@@ -330,7 +460,8 @@ function collectCandidates(
             imageHeight,
             word.text,
             contextText,
-            passName
+            passName,
+            expectedSteps
           ));
         });
 
@@ -347,7 +478,8 @@ function collectCandidates(
             imageHeight,
             fragment,
             contextText,
-            passName
+            passName,
+            expectedSteps
           ));
         });
       });
@@ -369,7 +501,8 @@ function fallbackCandidatesFromText(
   confidence: number,
   imageWidth: number,
   imageHeight: number,
-  passName: OcrVariantName
+  passName: OcrVariantName,
+  expectedSteps?: number
 ): NumericCandidate[] {
   const fallbackBox: Tesseract.Bbox = {
     x0: Math.round(imageWidth * 0.2),
@@ -382,7 +515,7 @@ function fallbackCandidatesFromText(
     .map((fragment) => {
       const value = parseNumericText(fragment);
       if (value === undefined) return undefined;
-      return createCandidate(value, confidence * 0.75, fallbackBox, imageWidth, imageHeight, fragment, text, passName);
+      return createCandidate(value, confidence * 0.75, fallbackBox, imageWidth, imageHeight, fragment, text, passName, expectedSteps);
     })
     .filter((candidate): candidate is NumericCandidate => Boolean(candidate));
 }
@@ -391,13 +524,13 @@ function selectBestCandidate(candidates: NumericCandidate[]): NumericCandidate |
   return candidates[0];
 }
 
-function resolveConsensus(passResults: OcrPassResult[]): EvidenceOcrResult {
+function resolveConsensus(passResults: OcrPassResult[], expectedSteps?: number): EvidenceOcrResult {
   // Use the strongest candidates from every pass, not only the first candidate.
   // A value receives at most one vote per OCR pass.
   const grouped = new Map<number, Map<OcrVariantName, NumericCandidate>>();
 
   passResults.forEach((pass) => {
-    pass.candidates.slice(0, 4).forEach((candidate) => {
+    pass.candidates.slice(0, 5).forEach((candidate) => {
       const byPass = grouped.get(candidate.value) || new Map<OcrVariantName, NumericCandidate>();
       const previous = byPass.get(pass.name);
       if (!previous || candidate.score > previous.score) byPass.set(pass.name, candidate);
@@ -405,10 +538,13 @@ function resolveConsensus(passResults: OcrPassResult[]): EvidenceOcrResult {
     });
   });
 
-  const rankedGroups = Array.from(grouped.entries()).sort(([, byPassA], [, byPassB]) => {
+  const rankedGroups = Array.from(grouped.entries()).sort(([valueA, byPassA], [valueB, byPassB]) => {
     if (byPassB.size !== byPassA.size) return byPassB.size - byPassA.size;
-    const scoreA = Array.from(byPassA.values()).reduce((sum, candidate) => sum + candidate.score, 0);
-    const scoreB = Array.from(byPassB.values()).reduce((sum, candidate) => sum + candidate.score, 0);
+
+    const expectedBonusA = expectedSteps && valueA === expectedSteps ? 25 : 0;
+    const expectedBonusB = expectedSteps && valueB === expectedSteps ? 25 : 0;
+    const scoreA = Array.from(byPassA.values()).reduce((sum, candidate) => sum + candidate.score, expectedBonusA);
+    const scoreB = Array.from(byPassB.values()).reduce((sum, candidate) => sum + candidate.score, expectedBonusB);
     return scoreB - scoreA;
   });
 
@@ -438,13 +574,14 @@ function resolveConsensus(passResults: OcrPassResult[]): EvidenceOcrResult {
     detectedSteps: winningValue,
     confidence,
     agreementCount,
-    passCount: OCR_PASS_COUNT,
+    passCount: passResults.length,
     alternatives
   };
 }
 
 export async function runEvidenceOcr(
-  image: string,
+  image: OcrInput,
+  expectedSteps?: number,
   onProgress?: (progress: number, status: string) => void
 ): Promise<EvidenceOcrResult> {
   const variants = await createOcrVariants(image);
@@ -479,7 +616,8 @@ export async function runEvidenceOcr(
         result.data.blocks,
         variant.image.width,
         variant.image.height,
-        variant.name
+        variant.name,
+        expectedSteps
       );
       const candidates = blockCandidates.length > 0
         ? blockCandidates
@@ -488,7 +626,8 @@ export async function runEvidenceOcr(
             result.data.confidence || 0,
             variant.image.width,
             variant.image.height,
-            variant.name
+            variant.name,
+            expectedSteps
           );
 
       passResults.push({
@@ -498,10 +637,14 @@ export async function runEvidenceOcr(
         selected: selectBestCandidate(candidates),
         candidates
       });
+
+      // Release the previous canvas after Tesseract has consumed it to reduce mobile memory pressure.
+      variant.image.width = 1;
+      variant.image.height = 1;
     }
 
     onProgress?.(100, 'สรุปผล OCR หลายรอบ');
-    return resolveConsensus(passResults);
+    return resolveConsensus(passResults, expectedSteps);
   } finally {
     await worker.terminate();
   }
@@ -512,27 +655,15 @@ export async function compressEvidenceImage(file: File): Promise<{
   mimeType: string;
   fileName: string;
 }> {
-  const sourceUrl = URL.createObjectURL(file);
+  const loaded = await loadDrawable(file);
 
   try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('ไม่สามารถอ่านไฟล์รูปภาพได้'));
-      img.src = sourceUrl;
+    const scale = calculateScale(loaded.width, loaded.height, {
+      maxSide: 1600,
+      maxPixels: 2_500_000,
+      allowUpscale: false
     });
-
-    const maxSide = 1600;
-    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
-    const width = Math.max(1, Math.round(image.naturalWidth * scale));
-    const height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('อุปกรณ์นี้ไม่รองรับการเตรียมรูปหลักฐาน');
-    context.drawImage(image, 0, 0, width, height);
+    const canvas = drawScaled(loaded.drawable, loaded.width, loaded.height, Math.min(1, scale));
 
     const mimeType = file.type === 'image/png' && file.size < 1_500_000 ? 'image/png' : 'image/jpeg';
     const dataUrl = mimeType === 'image/png'
@@ -542,8 +673,10 @@ export async function compressEvidenceImage(file: File): Promise<{
     const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9ก-๙_-]+/g, '_') || 'evidence';
     const fileName = `${baseName}.${mimeType === 'image/png' ? 'png' : 'jpg'}`;
 
+    canvas.width = 1;
+    canvas.height = 1;
     return { dataUrl, mimeType, fileName };
   } finally {
-    URL.revokeObjectURL(sourceUrl);
+    loaded.release();
   }
 }
