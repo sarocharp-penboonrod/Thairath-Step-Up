@@ -110,7 +110,12 @@ export default function SubmissionView({ activeUser, currentWeek, stepLogs, onAd
       setImageData(prepared.dataUrl);
       setImagePreview(prepared.dataUrl);
       try {
-        setOcrResult(await runEvidenceOcr(prepared.dataUrl, (progress, status) => { setOcrProgress(progress); setOcrStatusText(status); }));
+        setOcrStatusText('กำลังอ่านรูปต้นฉบับความละเอียดสูง');
+        setOcrResult(await runEvidenceOcr(
+          file,
+          parsedSteps > 0 ? parsedSteps : undefined,
+          (progress, status) => { setOcrProgress(progress); setOcrStatusText(status); }
+        ));
       } catch (error) {
         console.warn('OCR failed:', error);
         setOcrResult({ text: '', confidence: 0, agreementCount: 0, passCount: 3, alternatives: [] });
@@ -255,7 +260,7 @@ export default function SubmissionView({ activeUser, currentWeek, stepLogs, onAd
                 ) : imagePreview ? (
                   <div className="flex flex-col sm:flex-row items-center gap-4 w-full"><img src={imagePreview} alt="Evidence preview" className="w-32 h-32 object-contain bg-white rounded-xl border border-slate-200" /><div className="text-left min-w-0"><p className="font-black text-black truncate">{imageName}</p><p className="text-xs text-slate-400 mt-1">กดเพื่อเปลี่ยนรูป</p>{isPreparingImage && <p className="text-sm font-bold text-[#00914E] mt-3 flex items-center gap-2"><LoaderCircle className="w-4 h-4 animate-spin" />OCR {ocrProgress}% · {ocrStatusText}</p>}</div></div>
                 ) : (
-                  <div className="text-center"><div className="w-12 h-12 rounded-full bg-emerald-50 text-[#00914E] flex items-center justify-center mx-auto"><Upload className="w-6 h-6" /></div><p className="font-black text-black mt-3">ลากรูปมาวาง หรือกดเพื่อเลือกไฟล์</p><p className="text-sm text-slate-400 mt-1">JPG, PNG, WEBP ไม่เกิน 8MB</p></div>
+                  <div className="text-center"><div className="w-12 h-12 rounded-full bg-emerald-50 text-[#00914E] flex items-center justify-center mx-auto"><Upload className="w-6 h-6" /></div><p className="font-black text-black mt-3">ลากรูปมาวาง หรือกดเพื่อเลือกไฟล์</p><p className="text-sm text-slate-400 mt-1">JPG, PNG, WEBP ไม่เกิน 8MB</p><p className="text-xs text-slate-400 mt-1">OCR จะอ่านจากภาพต้นฉบับความละเอียดสูงโดยอัตโนมัติ</p></div>
                 )}
               </button>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" disabled={uploadLocked} onChange={(event) => { const file = event.target.files?.[0]; if (file) void processFile(file); event.currentTarget.value = ''; }} />
