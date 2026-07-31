@@ -1,5 +1,5 @@
 /**
- * Thairath Step Up & Health Up — v2.4.4 Google Sheets Backend
+ * Thairath Step Up & Health Up — v2.4.5 Google Sheets Backend
  * Deploy as Web App: Execute as Me / Who has access: Anyone.
  */
 
@@ -57,7 +57,7 @@ const CAMPAIGN_WEEKS = [
 
 function doGet() {
   setup_();
-  return json_({ ok: true, data: { service: 'thairath-step-up-v2.4-backend', ready: true } });
+  return json_({ ok: true, data: { service: 'thairath-step-up-v2.4.5-backend', ready: true } });
 }
 
 function doPost(e) {
@@ -72,6 +72,9 @@ function doPost(e) {
       case 'setup':
         syncWeeklyTarget_();
         return json_({ ok: true, data: { ready: true, weeklyTarget: CONFIG.WEEKLY_TARGET } });
+      case 'syncEmployeeBuIds':
+        requireAdmin_(adminContext);
+        return json_({ ok: true, data: syncEmployeeBuIdsFromEmployeeId_() });
       case 'verifyLogin':
         return json_({ ok: true, data: verifyLogin_(body.employeeId, body.password, Number(body.currentMonth) || 1) });
       case 'getUserProfile':
@@ -204,6 +207,20 @@ function findEmployeeByKey_(idOrEmail) {
       return rowToObject_(values, rowNumber, EMPLOYEE_HEADERS);
     }
   }
+
+  // Fallback for Sheets cells that removed leading zeroes (001234 -> 1234)
+  // and for case differences in alphanumeric employee IDs.
+  const targetKey = canonicalEmployeeKey_(idOrEmail);
+  if (!targetKey) return null;
+  const values = sheet.getRange(2, 1, lastRow - 1, EMPLOYEE_HEADERS.length).getValues();
+  const employeeIndex = EMPLOYEE_HEADERS.indexOf('employeeId');
+  const emailIndex = EMPLOYEE_HEADERS.indexOf('email');
+  for (let rowIndex = 0; rowIndex < values.length; rowIndex++) {
+    if (canonicalEmployeeKey_(values[rowIndex][employeeIndex]) === targetKey ||
+        canonicalEmployeeKey_(values[rowIndex][emailIndex]) === targetKey) {
+      return rowToObject_(values[rowIndex], rowIndex + 2, EMPLOYEE_HEADERS);
+    }
+  }
   return null;
 }
 
@@ -219,6 +236,53 @@ function canonicalEmployeeKey_(value) {
   const localPart = text.indexOf('@') >= 0 ? text.split('@')[0] : text;
   if (/^\d{1,6}$/.test(localPart)) return localPart.padStart(6, '0');
   return text;
+}
+
+function normalizedEmployeeIdForRules_(value) {
+  let id = String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (id.indexOf('@') >= 0) id = id.split('@')[0];
+  if (/^\d{1,6}$/.test(id)) id = id.padStart(6, '0');
+  return id;
+}
+
+function isValidEmployeeId_(value) {
+  const id = normalizedEmployeeIdForRules_(value);
+  return /^\d{6}$/.test(id) || /^[A-Z][A-Z0-9]{1,11}$/.test(id);
+}
+
+// Automatic BU mapping requested by Project Owner.
+// Exact exceptions must be checked before generic V-prefix handling.
+function deriveBuIdFromEmployeeId_(employeeId) {
+  const id = normalizedEmployeeIdForRules_(employeeId);
+  if (!id) return '';
+
+  if (['V90005', 'V90099', 'V99999'].indexOf(id) >= 0) return 'VG3';
+
+  if (id.indexOf('100') === 0 || id.indexOf('T10') === 0 || id.indexOf('F10') === 0) return 'VG3';
+  if (id.indexOf('200') === 0 || id.indexOf('T20') === 0 || id.indexOf('F20') === 0) return 'TVB';
+
+  if (id.indexOf('00') === 0 || id.indexOf('T9') === 0 ||
+      id.indexOf('R0') === 0 || id.indexOf('F9') === 0) return 'TR';
+
+  if (id.indexOf('400') === 0) return 'EVP';
+  if (id.indexOf('500') === 0) return 'TRL';
+  if (id.indexOf('800') === 0) return 'YOD';
+
+  if (id.indexOf('V') === 0) return 'TR';
+  return '';
+}
+
+function assignedOrgValue_(value) {
+  const id = normalizeId_(value);
+  return id && normalizeText_(id) !== 'unassigned' ? id : '';
+}
+
+// A manually entered BU remains an override. Automatic mapping is used only
+// when buId is blank or UNASSIGNED.
+function resolveBuId_(employeeId, rawBuId) {
+  const manual = assignedOrgValue_(rawBuId);
+  if (manual) return manual.toUpperCase();
+  return deriveBuIdFromEmployeeId_(employeeId) || 'UNASSIGNED';
 }
 function number_(value, fallback) {
   const number = Number(value);
@@ -240,6 +304,84 @@ function syncWeeklyTarget_() {
   const targetColumn = EMPLOYEE_HEADERS.indexOf('weekTarget') + 1;
   const range = sheet.getRange(2, targetColumn, lastRow - 1, 1);
   range.setValues(range.getValues().map(function() { return [CONFIG.WEEKLY_TARGET]; }));
+}
+
+// Run this public function once from Apps Script after deploying v2.4.5.
+// It fills only blank/UNASSIGNED BU cells and preserves manual overrides.
+function syncEmployeeBuIdsFromEmployeeId() {
+  setup_();
+  const result = syncEmployeeBuIdsFromEmployeeId_();
+  Logger.log(JSON.stringify(result));
+  return result;
+}
+
+function syncEmployeeBuIdsFromEmployeeId_() {
+  const employeeSheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
+  const employeeLastRow = employeeSheet.getLastRow();
+  let updatedEmployees = 0;
+  let updatedLogs = 0;
+
+  if (employeeLastRow >= 2) {
+    const employeeIdColumn = EMPLOYEE_HEADERS.indexOf('employeeId') + 1;
+    const buColumn = EMPLOYEE_HEADERS.indexOf('buId') + 1;
+    const employeeIds = employeeSheet.getRange(2, employeeIdColumn, employeeLastRow - 1, 1).getValues();
+    const buValues = employeeSheet.getRange(2, buColumn, employeeLastRow - 1, 1).getValues();
+
+    for (let index = 0; index < employeeIds.length; index++) {
+      if (assignedOrgValue_(buValues[index][0])) continue;
+      const derived = deriveBuIdFromEmployeeId_(employeeIds[index][0]);
+      if (derived) {
+        buValues[index][0] = derived;
+        updatedEmployees++;
+      }
+    }
+    if (updatedEmployees) employeeSheet.getRange(2, buColumn, employeeLastRow - 1, 1).setValues(buValues);
+  }
+
+  const users = fetchAllUsers_();
+  const usersByKey = {};
+  users.forEach(function(user) {
+    const idKey = canonicalEmployeeKey_(user.employeeId);
+    const emailKey = canonicalEmployeeKey_(user.email);
+    if (idKey) usersByKey[idKey] = user;
+    if (emailKey) usersByKey[emailKey] = user;
+  });
+
+  const logSheet = ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
+  const logLastRow = logSheet.getLastRow();
+  if (logLastRow >= 2) {
+    const values = logSheet.getRange(2, 1, logLastRow - 1, LOG_HEADERS.length).getValues();
+    const employeeIndex = LOG_HEADERS.indexOf('employeeId');
+    const emailIndex = LOG_HEADERS.indexOf('userEmail');
+    const buIndex = LOG_HEADERS.indexOf('buIdAtSubmission');
+    const departmentIndex = LOG_HEADERS.indexOf('departmentIdAtSubmission');
+
+    values.forEach(function(row) {
+      const user = usersByKey[canonicalEmployeeKey_(row[employeeIndex])] ||
+        usersByKey[canonicalEmployeeKey_(row[emailIndex])] || null;
+      if (!user) return;
+
+      let changed = false;
+      if (!assignedOrgValue_(row[buIndex])) {
+        row[buIndex] = resolveBuId_(user.employeeId, user.buId);
+        changed = true;
+      }
+      if (!assignedOrgValue_(row[departmentIndex]) && assignedOrgValue_(user.departmentId)) {
+        row[departmentIndex] = user.departmentId;
+        changed = true;
+      }
+      if (changed) updatedLogs++;
+    });
+
+    if (updatedLogs) logSheet.getRange(2, 1, logLastRow - 1, LOG_HEADERS.length).setValues(values);
+  }
+
+  invalidateLeaderboardCache_();
+  return {
+    updatedEmployees: updatedEmployees,
+    updatedStepLogs: updatedLogs,
+    mappingRulesVersion: 'v2.4.5'
+  };
 }
 
 function parseBirthDate_(value, passwordFallback) {
@@ -304,7 +446,7 @@ function employeeToProfile_(row) {
     name: [firstName, surname].filter(Boolean).join(' ').trim() || (nickname ? 'คุณ' + nickname : 'พนักงาน'),
     surname: surname,
     nickname: nickname,
-    buId: normalizeId_(row.buId) || 'UNASSIGNED',
+    buId: resolveBuId_(employeeId, row.buId),
     departmentId: normalizeId_(row.departmentId) || 'UNASSIGNED',
     weekTarget: CONFIG.WEEKLY_TARGET,
     totalTickets: number_(row.totalTickets, 0),
@@ -333,7 +475,7 @@ function updateEmployeeTimestamp_(employeeId, headerName, value) {
 function verifyLogin_(employeeId, password, currentMonth) {
   const cleanId = normalizeId_(employeeId);
   const cleanPassword = normalizeId_(password);
-  if (!/^\d{6}$/.test(cleanId)) throw new Error('รหัสพนักงานต้องเป็นตัวเลข 6 หลัก');
+  if (!isValidEmployeeId_(cleanId)) throw new Error('รหัสพนักงานไม่ถูกต้อง กรุณากรอกตัวเลข 6 หลักหรือรหัสตัวอักษรตามฐานพนักงาน');
   if (!/^\d{6}$/.test(cleanPassword)) throw new Error('รหัสผ่านวันเกิดต้องเป็นตัวเลข 6 หลัก');
   const row = findEmployeeByKey_(cleanId);
   if (!row) throw new Error('ไม่พบรหัสพนักงานนี้ในฐานข้อมูล กรุณาติดต่อ HR/Admin');
@@ -360,7 +502,7 @@ function getUserProfile_(idOrEmail) {
 function saveUserProfile_(idOrEmail, profile, password, allowOrgChange) {
   if (!profile) throw new Error('Missing profile payload');
   const employeeId = normalizeId_(profile.employeeId || idOrEmail);
-  if (!/^\d{6}$/.test(employeeId)) throw new Error('รหัสพนักงานต้องเป็นตัวเลข 6 หลัก');
+  if (!isValidEmployeeId_(employeeId)) throw new Error('รหัสพนักงานไม่ถูกต้อง');
   const sheet = ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
   const existing = findEmployeeByKey_(employeeId);
   if (!existing && !allowOrgChange) throw new Error('ไม่พบข้อมูลพนักงาน ไม่อนุญาตให้สร้างบัญชีจากหน้า User');
@@ -373,7 +515,8 @@ function saveUserProfile_(idOrEmail, profile, password, allowOrgChange) {
     ? (normalizeId_(password) || (submittedBirthDate ? passwordFromBirthDate_(submittedBirthDate) : (existing ? existing.password : '')))
     : (existing ? existing.password : '');
   const createdAt = existing ? existing.createdAt : now_();
-  const buId = allowOrgChange ? normalizeId_(profile.buId) : normalizeId_(existing && existing.buId);
+  const requestedBuId = allowOrgChange ? normalizeId_(profile.buId) : normalizeId_(existing && existing.buId);
+  const buId = resolveBuId_(employeeId, requestedBuId);
   const departmentId = allowOrgChange ? normalizeId_(profile.departmentId) : normalizeId_(existing && existing.departmentId);
   const rowValues = [
     employeeId,
@@ -391,7 +534,7 @@ function saveUserProfile_(idOrEmail, profile, password, allowOrgChange) {
     now_(),
     existing ? String(existing.lastLoginAt || '') : '',
     existing ? String(existing.lastSubmitAt || '') : '',
-    buId || 'UNASSIGNED'
+    buId
   ];
   if (existing) sheet.getRange(existing._row, 1, 1, EMPLOYEE_HEADERS.length).setValues([rowValues]);
   else sheet.appendRow(rowValues);
@@ -401,10 +544,10 @@ function saveUserProfile_(idOrEmail, profile, password, allowOrgChange) {
 function adminSaveUserProfile_(idOrEmail, profile, password, adminContext) {
   if (!profile) throw new Error('Missing profile payload');
   const existing = findEmployeeByKey_(profile.employeeId || idOrEmail);
-  if (existing && !adminCanAccessBU_(adminContext, existing.buId || 'UNASSIGNED')) {
+  if (existing && !adminCanAccessBU_(adminContext, resolveBuId_(existing.employeeId, existing.buId))) {
     throw new Error('ไม่มีสิทธิ์แก้ไขพนักงานใน BU เดิม');
   }
-  const targetBuId = normalizeId_(profile.buId) || 'UNASSIGNED';
+  const targetBuId = resolveBuId_(profile.employeeId || idOrEmail, profile.buId);
   if (!adminCanAccessBU_(adminContext, targetBuId)) {
     throw new Error('ไม่มีสิทธิ์บันทึกพนักงานเข้า BU นี้');
   }
@@ -538,7 +681,7 @@ function filterLogsForAdmin_(logs, context) {
   });
   return logs.filter(function(log) {
     const user = userMap[normalizeText_(log.employeeId)] || userMap[normalizeText_(log.userEmail)];
-    const buId = log.buIdAtSubmission || (user && user.buId) || 'UNASSIGNED';
+    const buId = assignedOrgValue_(log.buIdAtSubmission) || (user && user.buId) || deriveBuIdFromEmployeeId_(log.employeeId || log.userEmail) || 'UNASSIGNED';
     return adminCanAccessBU_(context, buId);
   });
 }
@@ -657,9 +800,10 @@ function saveUserLog_(userKey, log) {
 }
 
 function getLogBU_(row) {
-  if (row.buIdAtSubmission) return normalizeId_(row.buIdAtSubmission);
+  const snapshotBuId = assignedOrgValue_(row.buIdAtSubmission);
+  if (snapshotBuId) return snapshotBuId.toUpperCase();
   const employee = findEmployeeByKey_(row.employeeId || row.userEmail);
-  return employee ? normalizeId_(employee.buId) : 'UNASSIGNED';
+  return employee ? resolveBuId_(employee.employeeId, employee.buId) : (deriveBuIdFromEmployeeId_(row.employeeId || row.userEmail) || 'UNASSIGNED');
 }
 
 function reviewUserLog_(logId, verificationStatus, reviewNote, adminContext) {
@@ -762,8 +906,8 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
       : rawKey;
     if (!employeeKey) return;
 
-    const buId = normalizeId_(log.buIdAtSubmission) || normalizeId_(matchedUser && matchedUser.buId) || 'UNASSIGNED';
-    const departmentId = normalizeId_(log.departmentIdAtSubmission) || normalizeId_(matchedUser && matchedUser.departmentId) || 'UNASSIGNED';
+    const buId = assignedOrgValue_(log.buIdAtSubmission) || normalizeId_(matchedUser && matchedUser.buId) || deriveBuIdFromEmployeeId_(log.employeeId || log.userEmail) || 'UNASSIGNED';
+    const departmentId = assignedOrgValue_(log.departmentIdAtSubmission) || normalizeId_(matchedUser && matchedUser.departmentId) || 'UNASSIGNED';
     const departmentKey = buId + '::' + departmentId;
     const steps = number_(log.steps, 0);
     if (!(steps > 0)) return;

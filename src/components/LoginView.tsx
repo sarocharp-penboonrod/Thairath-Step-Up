@@ -26,7 +26,7 @@ export default function LoginView({ currentMonth, onLoginSuccess }: LoginViewPro
     event.preventDefault();
     setSigninError('');
     setFirstTimeSetupActive(false);
-    const cleanId = employeeId.trim();
+    const cleanId = employeeId.trim().toUpperCase();
     const cleanPassword = password.trim();
 
     if (isAdminLogin) {
@@ -52,7 +52,7 @@ export default function LoginView({ currentMonth, onLoginSuccess }: LoginViewPro
       return;
     }
 
-    if (!/^\d{6}$/.test(cleanId)) return setSigninError('กรุณากรอกรหัสพนักงานเป็นตัวเลข 6 หลัก');
+    if (!(/^\d{6}$/.test(cleanId) || /^[A-Z][A-Z0-9]{1,11}$/i.test(cleanId))) return setSigninError('กรุณากรอกรหัสพนักงานให้ตรงกับฐานข้อมูล');
     if (!/^\d{6}$/.test(cleanPassword)) return setSigninError('กรุณากรอกรหัสผ่านวันเดือนปีเกิด 6 หลัก พ.ศ.');
 
     setLoading(true);
@@ -144,12 +144,13 @@ export default function LoginView({ currentMonth, onLoginSuccess }: LoginViewPro
                 <p className="text-xs text-slate-500 mt-1">ระบบจะโหลดเฉพาะข้อมูลที่เกี่ยวข้องกับผู้ใช้งาน</p>
               </div>
               {signinError && <div className="p-3.5 bg-red-50 text-red-600 rounded-xl border border-red-100 text-sm font-bold">⚠️ {signinError}</div>}
-              <Field label={isAdminLogin ? 'ชื่อบัญชี Admin' : 'รหัสพนักงาน 6 หลัก'} icon={<User className="w-5 h-5" />}>
+              <Field label={isAdminLogin ? 'ชื่อบัญชี Admin' : 'รหัสพนักงาน'} icon={<User className="w-5 h-5" />}>
                 <input
                   type="text"
                   value={employeeId}
-                  onChange={(event) => setEmployeeId(isAdminLogin ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onChange={(event) => setEmployeeId(isAdminLogin ? event.target.value : event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12))}
                   className="field-input field-input-leading"
+                  placeholder={isAdminLogin ? undefined : 'เช่น 001234, T90001, V90005'}
                   autoComplete="username"
                   required
                 />
