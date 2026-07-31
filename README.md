@@ -235,3 +235,12 @@ npm run build
 ```
 
 Node.js แนะนำ: `22.x`
+
+## v2.4.3 Mobile OCR
+
+- OCR reads the original mobile image instead of the 1,600px upload copy.
+- Portrait screenshots use a high-resolution full pass plus two broad upper/centre crop passes.
+- The Google Drive upload remains compressed.
+- The entered step value only boosts a candidate when OCR actually detects that number.
+- No paid OCR service or additional environment variable is required.
+

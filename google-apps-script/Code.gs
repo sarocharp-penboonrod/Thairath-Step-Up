@@ -1,5 +1,5 @@
 /**
- * Thairath Step Up & Health Up — v2.4 Google Sheets Backend
+ * Thairath Step Up & Health Up — v2.4.4 Google Sheets Backend
  * Deploy as Web App: Execute as Me / Who has access: Anyone.
  */
 
@@ -209,6 +209,17 @@ function findEmployeeByKey_(idOrEmail) {
 
 function normalizeId_(value) { return String(value || '').trim(); }
 function normalizeText_(value) { return String(value || '').trim().toLowerCase(); }
+
+// Use one canonical key for employee IDs and employee e-mails.
+// This protects Leaderboard matching when Sheets converts 001234 to 1234,
+// or when a StepLog contains an e-mail while Employees contains an ID.
+function canonicalEmployeeKey_(value) {
+  const text = normalizeText_(value);
+  if (!text) return '';
+  const localPart = text.indexOf('@') >= 0 ? text.split('@')[0] : text;
+  if (/^\d{1,6}$/.test(localPart)) return localPart.padStart(6, '0');
+  return text;
+}
 function number_(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -658,6 +669,10 @@ function reviewUserLog_(logId, verificationStatus, reviewNote, adminContext) {
   const row = findRow_(CONFIG.LOG_SHEET, LOG_HEADERS, function(item) { return String(item.id) === String(logId); });
   if (!row) throw new Error('ไม่พบรายการหลักฐานที่ต้องการตรวจ');
   if (!adminCanAccessBU_(adminContext, getLogBU_(row))) throw new Error('ไม่มีสิทธิ์ตรวจหลักฐานของ BU นี้');
+  const currentStatus = normalizeVerificationStatus_(row.verificationStatus);
+  if (currentStatus === 'AUTO_VERIFIED' && nextStatus === 'APPROVED') {
+    return logRowToObject_(row);
+  }
   const timestamp = now_();
   sheet.getRange(row._row, LOG_HEADERS.indexOf('verificationStatus') + 1).setValue(nextStatus);
   sheet.getRange(row._row, LOG_HEADERS.indexOf('reviewNote') + 1).setValue(String(reviewNote || '').slice(0, 500));
@@ -709,28 +724,29 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
       try { return JSON.parse(cached); } catch (err) { console.warn('Leaderboard cache parse failed: ' + err); }
     }
   }
-  const users = fetchAllUsers_().filter(function(user) { return normalizeText_(user.status || 'Active') === 'active'; });
+
+  const users = fetchAllUsers_().filter(function(user) {
+    return normalizeText_(user.status || 'Active') === 'active';
+  });
   const logs = fetchAllStepLogs_().filter(function(log) {
     return Number(log.week) === Number(currentMonth) && isVerifiedStatus_(log.verificationStatus);
   });
+
   const usersByKey = {};
   users.forEach(function(user) {
-    usersByKey[normalizeText_(user.employeeId)] = user;
-    usersByKey[normalizeText_(user.email)] = user;
+    const idKey = canonicalEmployeeKey_(user.employeeId);
+    const emailKey = canonicalEmployeeKey_(user.email);
+    if (idKey) usersByKey[idKey] = user;
+    if (emailKey) usersByKey[emailKey] = user;
   });
 
-  // First average each employee's verified weekly averages. This prevents frequent submitters receiving extra weight.
-  const employeeValues = {};
-  logs.forEach(function(log) {
-    const key = normalizeText_(log.employeeId || log.userEmail);
-    if (!employeeValues[key]) employeeValues[key] = [];
-    employeeValues[key].push(number_(log.steps, 0));
-  });
-  const employeeAverages = {};
-  Object.keys(employeeValues).forEach(function(key) { employeeAverages[key] = average_(employeeValues[key]); });
-
+  // Keep one average per employee inside each organisation snapshot.
+  // AUTO_VERIFIED and APPROVED are both final verified states.
+  const buParticipantValues = {};
+  const departmentParticipantValues = {};
   const buIds = {};
   const departmentKeys = {};
+
   users.forEach(function(user) {
     const buId = normalizeId_(user.buId) || 'UNASSIGNED';
     const departmentId = normalizeId_(user.departmentId) || 'UNASSIGNED';
@@ -738,10 +754,39 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
     departmentKeys[buId + '::' + departmentId] = { buId: buId, departmentId: departmentId };
   });
 
+  logs.forEach(function(log) {
+    const rawKey = canonicalEmployeeKey_(log.employeeId) || canonicalEmployeeKey_(log.userEmail);
+    const matchedUser = usersByKey[canonicalEmployeeKey_(log.employeeId)] || usersByKey[canonicalEmployeeKey_(log.userEmail)] || null;
+    const employeeKey = matchedUser
+      ? (canonicalEmployeeKey_(matchedUser.employeeId) || canonicalEmployeeKey_(matchedUser.email))
+      : rawKey;
+    if (!employeeKey) return;
+
+    const buId = normalizeId_(log.buIdAtSubmission) || normalizeId_(matchedUser && matchedUser.buId) || 'UNASSIGNED';
+    const departmentId = normalizeId_(log.departmentIdAtSubmission) || normalizeId_(matchedUser && matchedUser.departmentId) || 'UNASSIGNED';
+    const departmentKey = buId + '::' + departmentId;
+    const steps = number_(log.steps, 0);
+    if (!(steps > 0)) return;
+
+    buIds[buId] = true;
+    departmentKeys[departmentKey] = { buId: buId, departmentId: departmentId };
+
+    if (!buParticipantValues[buId]) buParticipantValues[buId] = {};
+    if (!buParticipantValues[buId][employeeKey]) buParticipantValues[buId][employeeKey] = [];
+    buParticipantValues[buId][employeeKey].push(steps);
+
+    if (!departmentParticipantValues[departmentKey]) departmentParticipantValues[departmentKey] = {};
+    if (!departmentParticipantValues[departmentKey][employeeKey]) departmentParticipantValues[departmentKey][employeeKey] = [];
+    departmentParticipantValues[departmentKey][employeeKey].push(steps);
+  });
+
   const businessUnits = Object.keys(buIds).map(function(buId) {
-    const members = users.filter(function(user) { return normalizeText_(user.buId) === normalizeText_(buId); });
-    const participantAverages = members.map(function(user) {
-      return employeeAverages[normalizeText_(user.employeeId)] || employeeAverages[normalizeText_(user.email)];
+    const members = users.filter(function(user) {
+      return normalizeText_(user.buId) === normalizeText_(buId);
+    });
+    const valuesByEmployee = buParticipantValues[buId] || {};
+    const participantAverages = Object.keys(valuesByEmployee).map(function(employeeKey) {
+      return average_(valuesByEmployee[employeeKey]);
     }).filter(function(value) { return Number.isFinite(value) && value > 0; });
     return {
       id: buId,
@@ -759,10 +804,12 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
   const departments = Object.keys(departmentKeys).map(function(key) {
     const item = departmentKeys[key];
     const members = users.filter(function(user) {
-      return normalizeText_(user.buId) === normalizeText_(item.buId) && normalizeText_(user.departmentId) === normalizeText_(item.departmentId);
+      return normalizeText_(user.buId) === normalizeText_(item.buId) &&
+        normalizeText_(user.departmentId) === normalizeText_(item.departmentId);
     });
-    const participantAverages = members.map(function(user) {
-      return employeeAverages[normalizeText_(user.employeeId)] || employeeAverages[normalizeText_(user.email)];
+    const valuesByEmployee = departmentParticipantValues[key] || {};
+    const participantAverages = Object.keys(valuesByEmployee).map(function(employeeKey) {
+      return average_(valuesByEmployee[employeeKey]);
     }).filter(function(value) { return Number.isFinite(value) && value > 0; });
     return {
       id: item.departmentId,
@@ -778,7 +825,12 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
     };
   }).sort(function(a, b) { return b.averageStepsPerPerson - a.averageStepsPerPerson; });
 
-  const result = { businessUnits: businessUnits, departments: departments, generatedAt: now_() };
+  const result = {
+    businessUnits: businessUnits,
+    departments: departments,
+    generatedAt: now_(),
+    verifiedLogCount: logs.length
+  };
   try { cache.put(cacheKey, JSON.stringify(result), 300); } catch (err) { console.warn('Leaderboard cache skipped: ' + err); }
   return result;
 }
