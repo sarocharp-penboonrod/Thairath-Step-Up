@@ -1,6 +1,16 @@
-# Thairath Step Up & Health Up — v2.5.2
+# Thairath Step Up & Health Up — v2.5.3
 
 ระบบกิจกรรมสุขภาพสำหรับบันทึก **ค่าเฉลี่ยจำนวนก้าวต่อวันของแต่ละสัปดาห์** พร้อม Screenshot, Tesseract.js OCR, Google Drive Evidence, Approval Workflow, Multi-BU Dashboard และ Leaderboard
+
+## สิ่งที่ปรับใน v2.5.3
+
+- Admin > Leaderboard เพิ่มตาราง **Ranking ฝ่ายที่มีผู้เข้าร่วมมากที่สุด**
+- `participantCount` = จำนวนพนักงาน Active ที่ส่งผลอย่างน้อย 1 ครั้งในช่วง Filter ที่เลือก (นับคนไม่ซ้ำ)
+- `participationRate` = `participantCount / memberCount × 100` แสดงทศนิยม 1 ตำแหน่ง
+- Ranking ตาราง Participation เรียง `participantCount` มากไปน้อย; ถ้าเท่ากันใช้ Participation % เป็น tie-breaker
+- Participation นับการส่งทุกสถานะ (รอตรวจ / ผ่าน / ไม่ผ่าน) เพราะวัดการเข้าร่วม ไม่ใช่ผลการตรวจหลักฐาน
+- ใช้ DepartmentMapping และ EmployeeRankingOverride ชุดเดียวกับ Department Ranking
+- ตัวอย่างจากฐานจริง: ฝ่ายทรัพยากรบุคคล 4/18 คน = **22.2%**
 
 ## สิ่งที่ปรับใน v2.5.2
 
@@ -9,7 +19,7 @@
 - ฝ่ายชื่อเดียวกันแต่คนละ BU **ไม่รวมกันโดยอัตโนมัติ**
 - การรวมข้าม BU เกิดเฉพาะรายการที่ Admin กำหนดใน `DepartmentMapping`
 - `DepartmentMapping.sourceBU` รองรับ `*` = ทุก BU หรือระบุ BU ต้นทางเพื่อควบคุมเฉพาะจุด
-- ค่าเริ่มต้น: ไทยรัฐบันเทิง→TVB, จป./Safety→TR, การตลาด→TVB, Platform Management→TVB, Thairath Creative→VG3
+- ค่าเริ่มต้น: ไทยรัฐบันเทิง→TVB, จป./Safety→TR, การตลาด→TVB, Platform Management→VG3, Thairath Creative→VG3
 - Admin เพิ่ม Export Ranking CSV และบันทึก Snapshot ลง `RankingHistory`
 - BU Ranking ยังใช้ค่าเฉลี่ยต่อคนเหมือนเดิม
 

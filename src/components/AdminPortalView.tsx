@@ -301,6 +301,75 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
     [users, periodLogs, buFilter, departmentFilter, searchText, resolveDepartment, usersByKey, employeeRankingOverrides]
   );
 
+  const participationRanking = useMemo(() => {
+    const groups = new Map<string, {
+      id: string;
+      buId: string;
+      memberIds: Set<string>;
+      participantIds: Set<string>;
+    }>();
+
+    users.filter((user) => normalize(user.status || 'Active') === 'active').forEach((user) => {
+      const rawBU = user.buId || 'UNASSIGNED';
+      const group = resolveDepartment(user.departmentId, rawBU, user.employeeId || user.email);
+      const key = `${normalize(group.buId)}::${normalize(group.id)}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: group.id || 'UNASSIGNED',
+          buId: group.buId || 'UNASSIGNED',
+          memberIds: new Set(),
+          participantIds: new Set()
+        });
+      }
+      groups.get(key)!.memberIds.add(normalize(user.employeeId || user.email));
+    });
+
+    // Participation = submitted at least once in the selected period.
+    // It intentionally counts all submission statuses (pending / verified / rejected),
+    // because this table measures participation behavior, not evidence quality.
+    periodLogs.forEach((log) => {
+      const user = findUser(log);
+      const employeeKey = normalize(user?.employeeId || log.employeeId || log.userEmail);
+      if (!employeeKey) return;
+      const rawBU = logBU(log);
+      const group = resolveDepartment(logDepartment(log), rawBU, user?.employeeId || log.employeeId || log.userEmail);
+      const key = `${normalize(group.buId)}::${normalize(group.id)}`;
+      const target = groups.get(key);
+      if (!target || !target.memberIds.has(employeeKey)) return;
+      target.participantIds.add(employeeKey);
+    });
+
+    const selectedCanonicalDepartment = departmentFilter === 'all'
+      ? null
+      : (() => {
+          const [rawBU, ...rawDepartmentParts] = departmentFilter.split('::');
+          return resolveDepartment(rawDepartmentParts.join('::'), rawBU);
+        })();
+    const search = normalize(searchText);
+
+    return Array.from(groups.values()).map((group) => {
+      const memberCount = group.memberIds.size;
+      const participantCount = group.participantIds.size;
+      return {
+        id: group.id,
+        buId: group.buId,
+        memberCount,
+        participantCount,
+        participationRate: memberCount ? Number(((participantCount / memberCount) * 100).toFixed(1)) : 0
+      };
+    }).filter((row) => {
+      if (buFilter !== 'all' && row.buId !== buFilter) return false;
+      if (selectedCanonicalDepartment && (normalize(row.id) !== normalize(selectedCanonicalDepartment.id) || normalize(row.buId) !== normalize(selectedCanonicalDepartment.buId))) return false;
+      if (search && ![row.id, row.buId].some((value) => normalize(value).includes(search))) return false;
+      return true;
+    }).sort((a, b) =>
+      b.participantCount - a.participantCount ||
+      b.participationRate - a.participationRate ||
+      b.memberCount - a.memberCount ||
+      a.id.localeCompare(b.id, 'th')
+    );
+  }, [users, periodLogs, buFilter, departmentFilter, searchText, resolveDepartment, usersByKey, employeeRankingOverrides]);
+
   const handleReview = async (log: AdminLog, status: 'APPROVED' | 'REJECTED') => {
     const note = status === 'REJECTED' ? window.prompt('ระบุเหตุผลที่ไม่อนุมัติหลักฐาน', log.reviewNote || '') : window.prompt('หมายเหตุการอนุมัติ (เว้นว่างได้)', log.reviewNote || '');
     if (note === null) return;
@@ -473,6 +542,46 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
               <RankingCard title="อันดับราย BU" icon={<Building2 className="w-5 h-5 text-[#00914E]" />} rows={buRanking} showBU={false} metric="average" />
               <RankingCard title="อันดับรายฝ่าย" icon={<Trophy className="w-5 h-5 text-[#00914E]" />} rows={departmentRanking} showBU metric="total" />
             </div>
+
+            <article className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-slate-200 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-black text-black flex items-center gap-2"><Users className="w-5 h-5 text-[#00914E]" />Ranking ฝ่ายที่มีผู้เข้าร่วมมากที่สุด</h3>
+                  <p className="text-xs text-slate-400 mt-1">นับพนักงานที่ส่งผลอย่างน้อย 1 ครั้งในช่วงที่เลือก ÷ พนักงาน Active ทั้งหมดในทีม · เรียงจากจำนวนผู้ส่งมากที่สุด</p>
+                </div>
+                <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-lg">{participationRanking.length} ฝ่าย</span>
+              </div>
+              <div className="overflow-x-auto max-h-[560px]">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500">
+                    <tr>
+                      <th className="p-4 text-center w-20">อันดับ</th>
+                      <th className="p-4 text-left">ฝ่าย</th>
+                      <th className="p-4 text-left w-24">BU</th>
+                      <th className="p-4 text-center w-36">ส่งผล / ทั้งหมด</th>
+                      <th className="p-4 text-right w-40">Participation</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {participationRanking.map((row, index) => (
+                      <tr key={`participation:${row.buId}:${row.id}`} className="hover:bg-slate-50">
+                        <td className="p-4 text-center font-black text-slate-500">#{index + 1}</td>
+                        <td className="p-4"><p className="font-bold text-black">{row.id}</p></td>
+                        <td className="p-4 font-bold text-slate-500">{row.buId}</td>
+                        <td className="p-4 text-center"><span className="font-black text-black">{row.participantCount}</span><span className="text-slate-400"> / {row.memberCount} คน</span></td>
+                        <td className="p-4">
+                          <div className="flex items-center justify-end gap-3">
+                            <div className="w-24 h-2 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-[#00914E] rounded-full" style={{ width: `${Math.min(100, row.participationRate)}%` }} /></div>
+                            <span className="w-14 text-right font-black text-[#00914E]">{row.participationRate.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {participationRanking.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400 font-bold">ยังไม่มีข้อมูลการเข้าร่วม</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </article>
           </section>
         )}
       </main>
