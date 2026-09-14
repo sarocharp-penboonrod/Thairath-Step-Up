@@ -1,6 +1,15 @@
-# Thairath Step Up & Health Up — v2.5.3
+# Thairath Step Up & Health Up — v2.5.4
 
 ระบบกิจกรรมสุขภาพสำหรับบันทึก **ค่าเฉลี่ยจำนวนก้าวต่อวันของแต่ละสัปดาห์** พร้อม Screenshot, Tesseract.js OCR, Google Drive Evidence, Approval Workflow, Multi-BU Dashboard และ Leaderboard
+
+
+## สิ่งที่ปรับใน v2.5.4
+
+- Admin > Leaderboard > **อันดับรายฝ่าย** เพิ่มปุ่ม Sort
+- สลับได้ระหว่าง **มาก → น้อย** และ **น้อย → มาก** ตามก้าวรวมของฝ่าย
+- ค่าเริ่มต้นยังเป็นมาก → น้อย เพื่อคงนิยาม Ranking มาตรฐาน
+- เมื่อเรียงน้อย → มาก เลข `#อันดับ` ยังคงเป็น Rank จริงจากการเรียงมาก → น้อย เพื่อไม่ให้ความหมายของอันดับเปลี่ยน
+- Sort เป็น Display-only: ไม่กระทบ Export Ranking, RankingHistory หรือสูตรคำนวณ
 
 ## สิ่งที่ปรับใน v2.5.3
 

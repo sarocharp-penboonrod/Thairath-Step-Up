@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  ArrowUpDown,
   Building2,
   CheckCircle2,
   Download,
@@ -114,6 +115,7 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
   const [newEmployeeError, setNewEmployeeError] = useState('');
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isSavingRanking, setIsSavingRanking] = useState(false);
+  const [departmentSortDirection, setDepartmentSortDirection] = useState<'desc' | 'asc'>('desc');
 
   const loadAdminData = async () => {
     setIsLoading(true); setLoadError('');
@@ -300,6 +302,15 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
     () => buildRanking('department'),
     [users, periodLogs, buFilter, departmentFilter, searchText, resolveDepartment, usersByKey, employeeRankingOverrides]
   );
+  const displayedDepartmentRanking = useMemo(() => {
+    const ranked = departmentRanking.map((row, index) => ({ ...row, rank: index + 1 }));
+    return [...ranked].sort((a, b) => {
+      if (departmentSortDirection === 'asc') {
+        return a.totalSteps - b.totalSteps || a.participationRate - b.participationRate || a.id.localeCompare(b.id, 'th');
+      }
+      return b.totalSteps - a.totalSteps || b.participationRate - a.participationRate || a.id.localeCompare(b.id, 'th');
+    });
+  }, [departmentRanking, departmentSortDirection]);
 
   const participationRanking = useMemo(() => {
     const groups = new Map<string, {
@@ -540,7 +551,24 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
               <RankingCard title="อันดับราย BU" icon={<Building2 className="w-5 h-5 text-[#00914E]" />} rows={buRanking} showBU={false} metric="average" />
-              <RankingCard title="อันดับรายฝ่าย" icon={<Trophy className="w-5 h-5 text-[#00914E]" />} rows={departmentRanking} showBU metric="total" />
+              <RankingCard
+                title="อันดับรายฝ่าย"
+                icon={<Trophy className="w-5 h-5 text-[#00914E]" />}
+                rows={displayedDepartmentRanking}
+                showBU
+                metric="total"
+                sortControl={
+                  <button
+                    type="button"
+                    onClick={() => setDepartmentSortDirection((current) => current === 'desc' ? 'asc' : 'desc')}
+                    className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-2 cursor-pointer transition-colors"
+                    title="สลับการเรียงก้าวรวมของฝ่าย"
+                  >
+                    <ArrowUpDown className="w-4 h-4" />
+                    {departmentSortDirection === 'desc' ? 'มาก → น้อย' : 'น้อย → มาก'}
+                  </button>
+                }
+              />
             </div>
 
             <article className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -595,4 +623,4 @@ function Loading() { return <div className="bg-white rounded-2xl p-16 text-cente
 function Empty({ text }: { text: string }) { return <div className="bg-white rounded-2xl p-16 text-center text-slate-400 text-sm font-bold">{text}</div>; }
 function DataBox({ label, value, className = 'bg-slate-50 text-black' }: { label: string; value: string; className?: string }) { return <div className={`rounded-xl p-3 ${className}`}><p className="text-xs text-slate-500 font-bold">{label}</p><p className="text-xl font-black mt-1">{value}</p></div>; }
 function ModalInput({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; type?: string }) { return <label className="block text-sm font-bold text-slate-600">{label}<input type={type} value={value} onChange={(event) => onChange(event.target.value)} className="w-full mt-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm outline-none focus:border-[#00914E]" required /></label>; }
-function RankingCard({ title, icon, rows, showBU, metric }: { title: string; icon: React.ReactNode; rows: Array<{ id: string; buId: string; memberCount: number; participantCount: number; participationRate: number; averageSteps: number; totalSteps: number }>; showBU: boolean; metric: 'average' | 'total' }) { return <article className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm"><h3 className="font-black text-black flex items-center gap-2">{icon}{title}</h3><p className="text-xs text-slate-400 mt-1">{metric === 'total' ? 'จัดอันดับจากผลรวมค่าเฉลี่ยรายพนักงานที่ผ่านตรวจ' : 'จัดอันดับจากค่าเฉลี่ยรายพนักงานที่ผ่านตรวจ'}</p><div className="space-y-3 mt-5">{rows.map((row, index) => <div key={`${row.buId}:${row.id}`} className="flex justify-between gap-3 bg-slate-50 rounded-xl p-3"><div><p className="font-bold text-black text-sm">#{index + 1} {row.id}</p><p className="text-xs text-slate-400 mt-1">{showBU ? `BU ${row.buId} · ` : ''}{row.participantCount}/{row.memberCount} คน · {row.participationRate}%</p></div><div className="text-right"><p className="font-black text-[#00914E] text-sm">{(metric === 'total' ? row.totalSteps : row.averageSteps).toLocaleString()}</p><p className="text-xs text-slate-400">{metric === 'total' ? 'ก้าวรวม' : 'ก้าว/วัน'}</p>{metric === 'total' && <p className="text-[10px] text-slate-400 mt-1">เฉลี่ย {row.averageSteps.toLocaleString()}/คน</p>}</div></div>)}{rows.length === 0 && <p className="text-sm text-slate-400 text-center py-8">ยังไม่มีข้อมูล</p>}</div></article>; }
+function RankingCard({ title, icon, rows, showBU, metric, sortControl }: { title: string; icon: React.ReactNode; rows: Array<{ id: string; buId: string; memberCount: number; participantCount: number; participationRate: number; averageSteps: number; totalSteps: number; rank?: number }>; showBU: boolean; metric: 'average' | 'total'; sortControl?: React.ReactNode }) { return <article className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-black text-black flex items-center gap-2">{icon}{title}</h3><p className="text-xs text-slate-400 mt-1">{metric === 'total' ? 'จัดอันดับจากผลรวมค่าเฉลี่ยรายพนักงานที่ผ่านตรวจ' : 'จัดอันดับจากค่าเฉลี่ยรายพนักงานที่ผ่านตรวจ'}</p></div>{sortControl}</div><div className="space-y-3 mt-5">{rows.map((row, index) => <div key={`${row.buId}:${row.id}`} className="flex justify-between gap-3 bg-slate-50 rounded-xl p-3"><div><p className="font-bold text-black text-sm">#{row.rank ?? index + 1} {row.id}</p><p className="text-xs text-slate-400 mt-1">{showBU ? `BU ${row.buId} · ` : ''}{row.participantCount}/{row.memberCount} คน · {row.participationRate}%</p></div><div className="text-right"><p className="font-black text-[#00914E] text-sm">{(metric === 'total' ? row.totalSteps : row.averageSteps).toLocaleString()}</p><p className="text-xs text-slate-400">{metric === 'total' ? 'ก้าวรวม' : 'ก้าว/วัน'}</p>{metric === 'total' && <p className="text-[10px] text-slate-400 mt-1">เฉลี่ย {row.averageSteps.toLocaleString()}/คน</p>}</div></div>)}{rows.length === 0 && <p className="text-sm text-slate-400 text-center py-8">ยังไม่มีข้อมูล</p>}</div></article>; }
