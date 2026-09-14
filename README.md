@@ -1,7 +1,18 @@
-# Thairath Step Up & Health Up — v2.5.4
+# Thairath Step Up & Health Up — v2.5.5
 
 ระบบกิจกรรมสุขภาพสำหรับบันทึก **ค่าเฉลี่ยจำนวนก้าวต่อวันของแต่ละสัปดาห์** พร้อม Screenshot, Tesseract.js OCR, Google Drive Evidence, Approval Workflow, Multi-BU Dashboard และ Leaderboard
 
+
+
+## สิ่งที่ปรับใน v2.5.5
+
+- Admin > Leaderboard ปรับ **Ranking ฝ่ายตามการเข้าร่วม** ให้จัดอันดับจาก `Participation %` เป็นเกณฑ์หลัก
+- สูตรยังเป็น `จำนวนพนักงานที่ส่งผลอย่างน้อย 1 ครั้ง / จำนวนพนักงาน Active ทั้งหมด × 100`
+- ถ้า Participation % เท่ากัน ใช้จำนวนผู้ส่งผลมากกว่าเป็น tie-breaker ตามด้วยจำนวนสมาชิกและชื่อฝ่าย
+- เปลี่ยนชื่อส่วนแสดงผลเป็น **Ranking ฝ่ายที่มีอัตราการเข้าร่วมสูงสุด** เพื่อให้ตรงกับเกณฑ์ Ranking
+- เพิ่มปุ่ม Sort สำหรับ Participation Ranking: **มาก → น้อย / น้อย → มาก**
+- Sort เป็น Display-only: เลข `#อันดับ` ยังคง Rank จริงจาก Participation % สูง → ต่ำ
+- ไม่เปลี่ยนสูตร Department Step Ranking, BU Ranking, DepartmentMapping, EmployeeRankingOverride หรือ Google Sheets schema
 
 ## สิ่งที่ปรับใน v2.5.4
 

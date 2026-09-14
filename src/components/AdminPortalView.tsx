@@ -116,6 +116,7 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isSavingRanking, setIsSavingRanking] = useState(false);
   const [departmentSortDirection, setDepartmentSortDirection] = useState<'desc' | 'asc'>('desc');
+  const [participationSortDirection, setParticipationSortDirection] = useState<'desc' | 'asc'>('desc');
 
   const loadAdminData = async () => {
     setIsLoading(true); setLoadError('');
@@ -374,12 +375,28 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
       if (search && ![row.id, row.buId].some((value) => normalize(value).includes(search))) return false;
       return true;
     }).sort((a, b) =>
-      b.participantCount - a.participantCount ||
       b.participationRate - a.participationRate ||
+      b.participantCount - a.participantCount ||
       b.memberCount - a.memberCount ||
       a.id.localeCompare(b.id, 'th')
     );
   }, [users, periodLogs, buFilter, departmentFilter, searchText, resolveDepartment, usersByKey, employeeRankingOverrides]);
+
+  const displayedParticipationRanking = useMemo(() => {
+    const ranked = participationRanking.map((row, index) => ({ ...row, rank: index + 1 }));
+    return [...ranked].sort((a, b) => {
+      if (participationSortDirection === 'asc') {
+        return a.participationRate - b.participationRate ||
+          a.participantCount - b.participantCount ||
+          a.memberCount - b.memberCount ||
+          a.id.localeCompare(b.id, 'th');
+      }
+      return b.participationRate - a.participationRate ||
+        b.participantCount - a.participantCount ||
+        b.memberCount - a.memberCount ||
+        a.id.localeCompare(b.id, 'th');
+    });
+  }, [participationRanking, participationSortDirection]);
 
   const handleReview = async (log: AdminLog, status: 'APPROVED' | 'REJECTED') => {
     const note = status === 'REJECTED' ? window.prompt('ระบุเหตุผลที่ไม่อนุมัติหลักฐาน', log.reviewNote || '') : window.prompt('หมายเหตุการอนุมัติ (เว้นว่างได้)', log.reviewNote || '');
@@ -503,7 +520,7 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
     <div className="min-h-screen bg-[#F2F4F7] text-[#344054] font-sans pb-24">
       <header className="bg-black text-white sticky top-0 z-40 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3"><button onClick={onExit} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer"><ArrowLeft className="w-5 h-5" /></button><div><p className="font-black text-lg">Thairath Step Up Admin</p><p className="text-xs text-slate-400">BU Management · Evidence Verification · v2.5.2</p></div></div>
+          <div className="flex items-center gap-3"><button onClick={onExit} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer"><ArrowLeft className="w-5 h-5" /></button><div><p className="font-black text-lg">Thairath Step Up Admin</p><p className="text-xs text-slate-400">BU Management · Evidence Verification · v2.5.5</p></div></div>
           <div className="flex gap-2"><a href={DATABASE_URL} target="_blank" rel="noreferrer" className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2"><FileSpreadsheet className="w-4 h-4" />ฐานข้อมูล<ExternalLink className="w-3 h-3" /></a><button onClick={() => void loadAdminData()} className="bg-[#00914E] hover:bg-[#00703c] px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />Refresh</button></div>
         </div>
       </header>
@@ -574,10 +591,21 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
             <article className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="p-5 border-b border-slate-200 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h3 className="font-black text-black flex items-center gap-2"><Users className="w-5 h-5 text-[#00914E]" />Ranking ฝ่ายที่มีผู้เข้าร่วมมากที่สุด</h3>
-                  <p className="text-xs text-slate-400 mt-1">นับพนักงานที่ส่งผลอย่างน้อย 1 ครั้งในช่วงที่เลือก ÷ พนักงาน Active ทั้งหมดในทีม · เรียงจากจำนวนผู้ส่งมากที่สุด</p>
+                  <h3 className="font-black text-black flex items-center gap-2"><Users className="w-5 h-5 text-[#00914E]" />Ranking ฝ่ายที่มีอัตราการเข้าร่วมสูงสุด</h3>
+                  <p className="text-xs text-slate-400 mt-1">Participation % = พนักงานที่ส่งผลอย่างน้อย 1 ครั้งในช่วงที่เลือก ÷ พนักงาน Active ทั้งหมดในทีม · Ranking จริงเรียงจาก % สูงสุด</p>
                 </div>
-                <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-lg">{participationRanking.length} ฝ่าย</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-lg">{participationRanking.length} ฝ่าย</span>
+                  <button
+                    type="button"
+                    onClick={() => setParticipationSortDirection((current) => current === 'desc' ? 'asc' : 'desc')}
+                    className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-2 cursor-pointer transition-colors"
+                    title="สลับการเรียง Participation %"
+                  >
+                    <ArrowUpDown className="w-4 h-4" />
+                    {participationSortDirection === 'desc' ? 'มาก → น้อย' : 'น้อย → มาก'}
+                  </button>
+                </div>
               </div>
               <div className="overflow-x-auto max-h-[560px]">
                 <table className="w-full min-w-[760px] text-sm">
@@ -591,9 +619,9 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {participationRanking.map((row, index) => (
+                    {displayedParticipationRanking.map((row) => (
                       <tr key={`participation:${row.buId}:${row.id}`} className="hover:bg-slate-50">
-                        <td className="p-4 text-center font-black text-slate-500">#{index + 1}</td>
+                        <td className="p-4 text-center font-black text-slate-500">#{row.rank}</td>
                         <td className="p-4"><p className="font-bold text-black">{row.id}</p></td>
                         <td className="p-4 font-bold text-slate-500">{row.buId}</td>
                         <td className="p-4 text-center"><span className="font-black text-black">{row.participantCount}</span><span className="text-slate-400"> / {row.memberCount} คน</span></td>
@@ -605,7 +633,7 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
                         </td>
                       </tr>
                     ))}
-                    {participationRanking.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400 font-bold">ยังไม่มีข้อมูลการเข้าร่วม</td></tr>}
+                    {displayedParticipationRanking.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400 font-bold">ยังไม่มีข้อมูลการเข้าร่วม</td></tr>}
                   </tbody>
                 </table>
               </div>
