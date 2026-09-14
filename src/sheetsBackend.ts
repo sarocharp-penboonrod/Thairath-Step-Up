@@ -6,7 +6,10 @@ import {
   VerificationStatus,
   EmployeeLoginResult,
   LeaderboardData,
-  AdminSession
+  AdminSession,
+  DepartmentMappingRule,
+  EmployeeRankingOverride,
+  RankingSnapshotInput
 } from './types';
 import { INITIAL_DEPARTMENTS } from './mockData';
 import { CAMPAIGN_WEEKLY_TARGET } from './campaignConfig';
@@ -61,8 +64,12 @@ function withSafeProfile(profile: ActiveUser): ActiveUser {
 }
 
 function normalizeLeaderboard(data?: LeaderboardData | null): LeaderboardData {
+  const sourceDepartments = data?.departments?.length ? data.departments : INITIAL_DEPARTMENTS;
   return {
-    departments: data?.departments?.length ? data.departments : INITIAL_DEPARTMENTS,
+    departments: sourceDepartments.map((department) => ({
+      ...department,
+      totalSteps: Number(department.totalSteps) || Number(department.averageStepsPerPerson) || 0
+    })),
     businessUnits: data?.businessUnits || [],
     generatedAt: data?.generatedAt || new Date().toISOString()
   };
@@ -177,6 +184,19 @@ export async function adminCreateUserOrUpdateProfile(idOrEmail: string, profile:
     profile,
     password: passwordText
   });
+}
+
+
+export async function fetchDepartmentMapping(): Promise<DepartmentMappingRule[]> {
+  return sheetsRequest<DepartmentMappingRule[]>('fetchDepartmentMapping');
+}
+
+export async function fetchEmployeeRankingOverrides(): Promise<EmployeeRankingOverride[]> {
+  return sheetsRequest<EmployeeRankingOverride[]>('fetchEmployeeRankingOverrides');
+}
+
+export async function saveRankingSnapshot(input: RankingSnapshotInput): Promise<{ snapshotId: string; rowsSaved: number }> {
+  return sheetsRequest<{ snapshotId: string; rowsSaved: number }>('saveRankingSnapshot', { snapshot: input });
 }
 
 export async function fetchAllUsers(): Promise<unknown[]> {

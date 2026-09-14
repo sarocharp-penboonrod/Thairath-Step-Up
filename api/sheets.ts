@@ -11,7 +11,10 @@ const ADMIN_ACTIONS = new Set([
   'fetchAllStepLogs',
   'reviewUserLog',
   'deleteUserLog',
-  'adminSaveUserProfile'
+  'adminSaveUserProfile',
+  'fetchDepartmentMapping',
+  'fetchEmployeeRankingOverrides',
+  'saveRankingSnapshot'
 ]);
 
 function readBody(req: any): any {

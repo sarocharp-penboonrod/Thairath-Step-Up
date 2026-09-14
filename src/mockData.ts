@@ -9,6 +9,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'CEO Office',
     participationRate: 92,
     averageStepsPerPerson: 8250,
+    totalSteps: 8250,
     status: 'up',
     statusText: 'เพิ่มขึ้น 1 อันดับ'
   },
@@ -19,6 +20,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Creative Digital Studio',
     participationRate: 85,
     averageStepsPerPerson: 7300,
+    totalSteps: 7300,
     status: 'stable',
     statusText: 'คงที่'
   },
@@ -29,6 +31,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Mirror Editorial',
     participationRate: 80,
     averageStepsPerPerson: 6950,
+    totalSteps: 6950,
     status: 'down',
     statusText: 'ลดลง 1 อันดับ'
   },
@@ -39,6 +42,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Product & Tech (Product)',
     participationRate: 88,
     averageStepsPerPerson: 7850,
+    totalSteps: 7850,
     status: 'up',
     statusText: 'เพิ่มขึ้น 2 อันดับ'
   },
@@ -49,6 +53,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Product & Tech (Tech)',
     participationRate: 90,
     averageStepsPerPerson: 8100,
+    totalSteps: 8100,
     status: 'up',
     statusText: 'เพิ่มขึ้น 3 อันดับ'
   },
@@ -59,6 +64,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Thairath Creative',
     participationRate: 84,
     averageStepsPerPerson: 7200,
+    totalSteps: 7200,
     status: 'stable',
     statusText: 'คงที่'
   },
@@ -69,6 +75,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Thairath Money',
     participationRate: 86,
     averageStepsPerPerson: 7420,
+    totalSteps: 7420,
     status: 'stable',
     statusText: 'คงที่'
   },
@@ -79,6 +86,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Marketing Department',
     participationRate: 78,
     averageStepsPerPerson: 6800,
+    totalSteps: 6800,
     status: 'down',
     statusText: 'ลดลง 1 อันดับ'
   },
@@ -89,6 +97,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Event Department',
     participationRate: 82,
     averageStepsPerPerson: 7600,
+    totalSteps: 7600,
     status: 'up',
     statusText: 'เพิ่มขึ้น 1 อันดับ'
   },
@@ -99,6 +108,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Online Editorial',
     participationRate: 89,
     averageStepsPerPerson: 7900,
+    totalSteps: 7900,
     status: 'stable',
     statusText: 'คงที่'
   },
@@ -109,6 +119,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Business Development',
     participationRate: 75,
     averageStepsPerPerson: 6500,
+    totalSteps: 6500,
     status: 'down',
     statusText: 'ลดลง 2 อันดับ'
   },
@@ -119,6 +130,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Thairath Plus',
     participationRate: 81,
     averageStepsPerPerson: 7120,
+    totalSteps: 7120,
     status: 'stable',
     statusText: 'คงที่'
   },
@@ -129,6 +141,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Enterprise Sales 1',
     participationRate: 77,
     averageStepsPerPerson: 6700,
+    totalSteps: 6700,
     status: 'down',
     statusText: 'ลดลง 1 อันดับ'
   },
@@ -139,6 +152,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Enterprise Sales 2',
     participationRate: 79,
     averageStepsPerPerson: 6920,
+    totalSteps: 6920,
     status: 'up',
     statusText: 'เพิ่มขึ้น 1 อันดับ'
   },
@@ -149,6 +163,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Enterprise Sales 3',
     participationRate: 74,
     averageStepsPerPerson: 6450,
+    totalSteps: 6450,
     status: 'stable',
     statusText: 'คงที่'
   },
@@ -159,6 +174,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Sales Operations Group',
     participationRate: 83,
     averageStepsPerPerson: 7350,
+    totalSteps: 7350,
     status: 'up',
     statusText: 'เพิ่มขึ้น 1 อันดับ'
   },
@@ -169,6 +185,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Safety & SHE Department',
     participationRate: 94,
     averageStepsPerPerson: 8950,
+    totalSteps: 8950,
     status: 'stable',
     statusText: 'คงที่อันดับ 1'
   },
@@ -179,6 +196,7 @@ export const INITIAL_DEPARTMENTS: DepartmentInfo[] = [
     nameEn: 'Government Sales',
     participationRate: 76,
     averageStepsPerPerson: 6600,
+    totalSteps: 6600,
     status: 'down',
     statusText: 'ลดลง 1 อันดับ'
   }

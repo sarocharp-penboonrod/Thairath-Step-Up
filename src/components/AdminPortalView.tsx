@@ -11,6 +11,7 @@ import {
   Footprints,
   RefreshCw,
   Search,
+  Save,
   ShieldAlert,
   Trash2,
   Trophy,
@@ -23,9 +24,22 @@ import {
   deleteUserLog,
   fetchAllStepLogs,
   fetchAllUsers,
-  reviewUserLog
+  fetchDepartmentMapping,
+  fetchEmployeeRankingOverrides,
+  reviewUserLog,
+  saveRankingSnapshot
 } from '../sheetsBackend';
-import { ActiveUser, DepartmentInfo, StepLog, VerificationStatus, isVerifiedStatus } from '../types';
+import {
+  ActiveUser,
+  DepartmentInfo,
+  DepartmentMappingRule,
+  EmployeeRankingOverride,
+  RankingSnapshotRow,
+  StepLog,
+  VerificationStatus,
+  isVerifiedStatus
+} from '../types';
+import { buildDepartmentResolver } from '../departmentGrouping';
 import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET, getCampaignMonth, getDefaultCampaignMonth } from '../campaignConfig';
 
 interface AdminPortalViewProps {
@@ -83,6 +97,8 @@ function departmentScopeValue(buId?: string, departmentId?: string): string {
 export default function AdminPortalView({ departments: fallbackDepartments, onExit }: AdminPortalViewProps) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [logs, setLogs] = useState<AdminLog[]>([]);
+  const [departmentMapping, setDepartmentMapping] = useState<DepartmentMappingRule[]>([]);
+  const [employeeRankingOverrides, setEmployeeRankingOverrides] = useState<EmployeeRankingOverride[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<AdminTab>('evidence');
@@ -97,13 +113,21 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
   const [newEmployee, setNewEmployee] = useState({ id: '', name: '', surname: '', nickname: '', buId: '', departmentId: '', birthDate: '' });
   const [newEmployeeError, setNewEmployeeError] = useState('');
   const [isSavingUser, setIsSavingUser] = useState(false);
+  const [isSavingRanking, setIsSavingRanking] = useState(false);
 
   const loadAdminData = async () => {
     setIsLoading(true); setLoadError('');
     try {
-      const [allUsers, allLogs] = await Promise.all([fetchAllUsers(), fetchAllStepLogs()]);
+      const [allUsers, allLogs, mapping, overrides] = await Promise.all([
+        fetchAllUsers(),
+        fetchAllStepLogs(),
+        fetchDepartmentMapping(),
+        fetchEmployeeRankingOverrides()
+      ]);
       setUsers(allUsers as AdminUser[]);
       setLogs(allLogs as AdminLog[]);
+      setDepartmentMapping(mapping);
+      setEmployeeRankingOverrides(overrides);
     } catch (error: any) {
       setLoadError(error?.message || 'ไม่สามารถโหลดข้อมูล Admin ได้');
     } finally { setIsLoading(false); }
@@ -118,13 +142,27 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
       const departmentId = user.departmentId || 'UNASSIGNED';
       map.set(`${buId}::${departmentId}`, { id: departmentId, buId, name: departmentId });
     });
+    departmentMapping.forEach((rule) => {
+      const buId = rule.canonicalBU || 'UNASSIGNED';
+      const id = rule.canonicalDepartmentId || rule.sourceDepartmentId;
+      const key = `${buId}::${id}`;
+      if (id && !map.has(key)) map.set(key, { id, buId, name: id });
+    });
+    employeeRankingOverrides.filter((item) => item.active !== false).forEach((item) => {
+      const id = item.targetDepartmentId || 'UNASSIGNED';
+      const targetBU = item.targetBU || 'UNASSIGNED';
+      const matchedRule = departmentMapping.find((rule) => normalize(rule.sourceDepartmentId) === normalize(id) && (!rule.sourceBU || rule.sourceBU === '*' || normalize(rule.sourceBU) === normalize(targetBU)));
+      const buId = item.targetBU || matchedRule?.canonicalBU || 'UNASSIGNED';
+      const key = `${buId}::${id}`;
+      if (!map.has(key)) map.set(key, { id, buId, name: id });
+    });
     fallbackDepartments.forEach((department) => {
       const buId = department.buId || 'UNASSIGNED';
       const key = `${buId}::${department.id}`;
       if (!map.has(key)) map.set(key, { id: department.id, buId, name: department.nameTh });
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'th'));
-  }, [users, fallbackDepartments]);
+  }, [users, fallbackDepartments, departmentMapping, employeeRankingOverrides]);
   const visibleDepartments = departmentCatalog.filter((department) => buFilter === 'all' || department.buId === buFilter);
 
   const usersByKey = useMemo(() => {
@@ -135,6 +173,10 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
   const findUser = (log: AdminLog) => usersByKey.get(normalize(log.employeeId)) || usersByKey.get(normalize(log.userEmail));
   const logBU = (log: AdminLog) => log.buIdAtSubmission || findUser(log)?.buId || 'UNASSIGNED';
   const logDepartment = (log: AdminLog) => log.departmentIdAtSubmission || findUser(log)?.departmentId || 'UNASSIGNED';
+  const resolveDepartment = useMemo(
+    () => buildDepartmentResolver(users, departmentMapping, employeeRankingOverrides),
+    [users, departmentMapping, employeeRankingOverrides]
+  );
 
   const periodLogs = useMemo(() => logs.filter((log) => {
     const monthMatches = monthFilter === 'all' || Number(log.week) === Number(monthFilter);
@@ -148,7 +190,7 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
     const search = normalize(searchText);
     if (!search) return true;
     const user = findUser(log);
-    return [log.employeeId, log.userEmail, log.imageName, user?.name, user?.nickname].some((value) => normalize(value).includes(search));
+    return [log.employeeId, log.userEmail, log.imageName, user?.name, user?.nickname, logBU(log), logDepartment(log)].some((value) => normalize(value).includes(search));
   }), [periodLogs, buFilter, departmentFilter, searchText, usersByKey]);
 
   const filteredEvidence = useMemo(() => scopedLogs.filter((log) =>
@@ -159,7 +201,7 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
     if (buFilter !== 'all' && user.buId !== buFilter) return false;
     if (departmentFilter !== 'all' && departmentScopeValue(user.buId, user.departmentId) !== departmentFilter) return false;
     const search = normalize(searchText);
-    return !search || [user.employeeId, user.email, user.name, user.nickname, displayName(user)].some((value) => normalize(value).includes(search));
+    return !search || [user.employeeId, user.email, user.name, user.nickname, displayName(user), user.buId, user.departmentId].some((value) => normalize(value).includes(search));
   }), [users, buFilter, departmentFilter, searchText]);
 
   const verifiedFilteredLogs = scopedLogs.filter((log) => isVerifiedStatus(log.verificationStatus));
@@ -173,39 +215,91 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
   }, [verifiedFilteredLogs]);
   const pendingCount = scopedLogs.filter((log) => log.verificationStatus === 'NEEDS_REVIEW').length;
 
-  const buildRanking = (mode: 'bu' | 'department') => {
-    const groups = new Map<string, { id: string; buId: string; memberIds: Set<string>; participantValues: Map<string, number[]> }>();
-    filteredUsers.filter((user) => normalize(user.status || 'Active') === 'active').forEach((user) => {
-      const id = mode === 'bu' ? user.buId : user.departmentId;
-      const buId = user.buId || 'UNASSIGNED';
-      const key = mode === 'bu' ? id : `${buId}::${id}`;
-      if (!groups.has(key)) groups.set(key, { id: id || 'UNASSIGNED', buId, memberIds: new Set(), participantValues: new Map() });
+  type AdminRankingRow = {
+    id: string;
+    buId: string;
+    memberCount: number;
+    participantCount: number;
+    participationRate: number;
+    averageSteps: number;
+    totalSteps: number;
+  };
+
+  const buildRanking = (mode: 'bu' | 'department'): AdminRankingRow[] => {
+    const groups = new Map<string, {
+      id: string;
+      buId: string;
+      memberIds: Set<string>;
+      participantValues: Map<string, number[]>;
+    }>();
+
+    users.filter((user) => normalize(user.status || 'Active') === 'active').forEach((user) => {
+      const rawBU = user.buId || 'UNASSIGNED';
+      const group = mode === 'bu'
+        ? { id: rawBU, buId: rawBU }
+        : resolveDepartment(user.departmentId, rawBU, user.employeeId || user.email);
+      const key = mode === 'bu' ? group.id : `${normalize(group.buId)}::${normalize(group.id)}`;
+      if (!groups.has(key)) {
+        groups.set(key, { id: group.id || 'UNASSIGNED', buId: group.buId || 'UNASSIGNED', memberIds: new Set(), participantValues: new Map() });
+      }
       groups.get(key)!.memberIds.add(normalize(user.employeeId || user.email));
     });
-    verifiedFilteredLogs.forEach((log) => {
-      const id = mode === 'bu' ? logBU(log) : logDepartment(log);
-      const buId = logBU(log);
-      const key = mode === 'bu' ? id : `${buId}::${id}`;
-      if (!groups.has(key)) groups.set(key, { id, buId, memberIds: new Set(), participantValues: new Map() });
+
+    periodLogs.filter((log) => isVerifiedStatus(log.verificationStatus)).forEach((log) => {
+      const rawBU = logBU(log);
+      const group = mode === 'bu'
+        ? { id: rawBU, buId: rawBU }
+        : resolveDepartment(logDepartment(log), rawBU, findUser(log)?.employeeId || log.employeeId || log.userEmail);
+      const key = mode === 'bu' ? group.id : `${normalize(group.buId)}::${normalize(group.id)}`;
+      if (!groups.has(key)) {
+        groups.set(key, { id: group.id || 'UNASSIGNED', buId: group.buId || 'UNASSIGNED', memberIds: new Set(), participantValues: new Map() });
+      }
       const employeeKey = normalize(log.employeeId || log.userEmail);
       const values = groups.get(key)!.participantValues.get(employeeKey) || [];
       values.push(Number(log.steps) || 0);
       groups.get(key)!.participantValues.set(employeeKey, values);
     });
+
+    const selectedCanonicalDepartment = departmentFilter === 'all'
+      ? null
+      : (() => {
+          const [rawBU, ...rawDepartmentParts] = departmentFilter.split('::');
+          return resolveDepartment(rawDepartmentParts.join('::'), rawBU);
+        })();
+
+    const search = normalize(searchText);
     return Array.from(groups.values()).map((group) => {
-      const employeeAverages = Array.from(group.participantValues.values()).map(average);
+      const employeeAverages = Array.from(group.participantValues.values()).map(average).filter((value) => value > 0);
       return {
         id: group.id,
         buId: group.buId,
         memberCount: group.memberIds.size,
         participantCount: employeeAverages.length,
         participationRate: group.memberIds.size ? Math.round(employeeAverages.length / group.memberIds.size * 100) : 0,
-        averageSteps: average(employeeAverages)
+        averageSteps: average(employeeAverages),
+        totalSteps: employeeAverages.reduce((sum, value) => sum + value, 0)
       };
-    }).sort((a, b) => b.averageSteps - a.averageSteps);
+    }).filter((row) => {
+      if (buFilter !== 'all' && row.buId !== buFilter) return false;
+      if (mode === 'department' && selectedCanonicalDepartment && (normalize(row.id) !== normalize(selectedCanonicalDepartment.id) || normalize(row.buId) !== normalize(selectedCanonicalDepartment.buId))) return false;
+      if (mode === 'bu' && selectedCanonicalDepartment && row.buId !== selectedCanonicalDepartment.buId) return false;
+      if (search && ![row.id, row.buId].some((value) => normalize(value).includes(search))) return false;
+      return true;
+    }).sort((a, b) => {
+      if (mode === 'department') {
+        return b.totalSteps - a.totalSteps || b.participationRate - a.participationRate || a.id.localeCompare(b.id, 'th');
+      }
+      return b.averageSteps - a.averageSteps || b.participationRate - a.participationRate || a.id.localeCompare(b.id, 'th');
+    });
   };
-  const buRanking = useMemo(() => buildRanking('bu'), [filteredUsers, verifiedFilteredLogs]);
-  const departmentRanking = useMemo(() => buildRanking('department'), [filteredUsers, verifiedFilteredLogs]);
+  const buRanking = useMemo(
+    () => buildRanking('bu'),
+    [users, periodLogs, buFilter, departmentFilter, searchText, resolveDepartment, usersByKey, employeeRankingOverrides]
+  );
+  const departmentRanking = useMemo(
+    () => buildRanking('department'),
+    [users, periodLogs, buFilter, departmentFilter, searchText, resolveDepartment, usersByKey, employeeRankingOverrides]
+  );
 
   const handleReview = async (log: AdminLog, status: 'APPROVED' | 'REJECTED') => {
     const note = status === 'REJECTED' ? window.prompt('ระบุเหตุผลที่ไม่อนุมัติหลักฐาน', log.reviewNote || '') : window.prompt('หมายเหตุการอนุมัติ (เว้นว่างได้)', log.reviewNote || '');
@@ -256,6 +350,68 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
   ]);
 
   const selectedPeriod = monthFilter === 'all' ? 'ทั้งโครงการ' : `${getCampaignMonth(Number(monthFilter)).label}${weekFilter === 'all' ? '' : ` · สัปดาห์ที่ ${weekFilter}`}`;
+
+  const rankingSnapshotRows = useMemo<RankingSnapshotRow[]>(() => [
+    ...buRanking.map((row, index) => ({
+      rankingType: 'BU' as const,
+      rank: index + 1,
+      buId: row.buId,
+      memberCount: row.memberCount,
+      participantCount: row.participantCount,
+      participationRate: row.participationRate,
+      totalSteps: row.totalSteps,
+      averageStepsPerPerson: row.averageSteps,
+      metricUsed: 'AVERAGE_STEPS_PER_PERSON' as const
+    })),
+    ...departmentRanking.map((row, index) => ({
+      rankingType: 'DEPARTMENT' as const,
+      rank: index + 1,
+      buId: row.buId,
+      departmentId: row.id,
+      memberCount: row.memberCount,
+      participantCount: row.participantCount,
+      participationRate: row.participationRate,
+      totalSteps: row.totalSteps,
+      averageStepsPerPerson: row.averageSteps,
+      metricUsed: 'TOTAL_STEPS' as const
+    }))
+  ], [buRanking, departmentRanking]);
+
+  const exportRanking = () => downloadCsv(`thairath_step_up_ranking_${new Date().toISOString().slice(0, 10)}.csv`, [
+    ['ช่วงข้อมูล', 'ประเภท Ranking', 'อันดับ', 'BU', 'ฝ่าย', 'สมาชิก', 'ผู้เข้าร่วม', 'Participation %', 'ก้าวรวม', 'ค่าเฉลี่ยต่อคน', 'เกณฑ์จัดอันดับ'],
+    ...rankingSnapshotRows.map((row) => [
+      selectedPeriod,
+      row.rankingType,
+      row.rank,
+      row.buId,
+      row.departmentId || '',
+      row.memberCount,
+      row.participantCount,
+      row.participationRate,
+      row.totalSteps,
+      row.averageStepsPerPerson,
+      row.metricUsed
+    ])
+  ]);
+
+  const handleSaveRanking = async () => {
+    if (!rankingSnapshotRows.length) return window.alert('ยังไม่มีข้อมูล Ranking สำหรับบันทึก');
+    setIsSavingRanking(true);
+    try {
+      const result = await saveRankingSnapshot({
+        periodLabel: selectedPeriod,
+        monthFilter,
+        weekFilter,
+        rows: rankingSnapshotRows
+      });
+      window.alert(`บันทึก Ranking ลง Google Sheets แล้ว ${result.rowsSaved} แถว\nSnapshot: ${result.snapshotId}`);
+    } catch (error: any) {
+      window.alert(error?.message || 'ไม่สามารถบันทึก Ranking ลง Google Sheets ได้');
+    } finally {
+      setIsSavingRanking(false);
+    }
+  };
+
   const cards = [
     { label: 'พนักงานในตัวกรอง', value: filteredUsers.length, suffix: 'คน', helper: buFilter === 'all' ? 'ทุก BU' : `BU ${buFilter}`, icon: Users, className: 'bg-emerald-50 text-[#00914E]' },
     { label: 'ผ่านตรวจแล้ว', value: verifiedFilteredLogs.length, suffix: 'รายการ', helper: selectedPeriod, icon: FileCheck2, className: 'bg-blue-50 text-blue-600' },
@@ -267,7 +423,7 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
     <div className="min-h-screen bg-[#F2F4F7] text-[#344054] font-sans pb-24">
       <header className="bg-black text-white sticky top-0 z-40 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3"><button onClick={onExit} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer"><ArrowLeft className="w-5 h-5" /></button><div><p className="font-black text-lg">Thairath Step Up Admin</p><p className="text-xs text-slate-400">BU Management · Evidence Verification · v2.4.4</p></div></div>
+          <div className="flex items-center gap-3"><button onClick={onExit} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer"><ArrowLeft className="w-5 h-5" /></button><div><p className="font-black text-lg">Thairath Step Up Admin</p><p className="text-xs text-slate-400">BU Management · Evidence Verification · v2.5.2</p></div></div>
           <div className="flex gap-2"><a href={DATABASE_URL} target="_blank" rel="noreferrer" className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2"><FileSpreadsheet className="w-4 h-4" />ฐานข้อมูล<ExternalLink className="w-3 h-3" /></a><button onClick={() => void loadAdminData()} className="bg-[#00914E] hover:bg-[#00703c] px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />Refresh</button></div>
         </div>
       </header>
@@ -281,7 +437,7 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
           <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} className="filter-input max-w-[230px]"><option value="all">ทุกฝ่าย</option>{visibleDepartments.map((department) => <option key={`${department.buId}:${department.id}`} value={departmentScopeValue(department.buId, department.id)}>{department.name}</option>)}</select>
           <select value={monthFilter} onChange={(event) => { setMonthFilter(event.target.value); setWeekFilter('all'); }} className="filter-input"><option value="all">ทุกเดือน</option>{CAMPAIGN_MONTHS.map((month) => <option key={month.number} value={month.number}>{month.label}</option>)}</select>
           <select value={weekFilter} onChange={(event) => setWeekFilter(event.target.value)} className="filter-input"><option value="all">ทุกสัปดาห์</option>{monthFilter !== 'all' && getCampaignMonth(Number(monthFilter)).weeks.map((week) => <option key={week.number} value={week.number}>{week.label}</option>)}</select>
-          <div className="relative flex-1 min-w-[220px]"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="ค้นหารหัส ชื่อ ชื่อเล่น หรือไฟล์" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm font-semibold outline-none focus:border-[#00914E]" /></div>
+          <div className="relative flex-1 min-w-[220px]"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={activeTab === 'leaderboard' ? 'ค้นหา BU หรือฝ่าย' : 'ค้นหารหัส ชื่อ ชื่อเล่น ฝ่าย หรือไฟล์'} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm font-semibold outline-none focus:border-[#00914E]" /></div>
         </section>
 
         <nav className="flex gap-2 overflow-x-auto">{([['evidence', `ตรวจหลักฐาน (${pendingCount})`, ShieldAlert], ['employees', `พนักงาน (${filteredUsers.length})`, Users], ['leaderboard', 'Leaderboard', Trophy]] as const).map(([id, label, Icon]) => <button key={id} onClick={() => setActiveTab(id)} className={`px-4 py-2.5 rounded-xl text-sm font-black flex items-center gap-2 whitespace-nowrap cursor-pointer ${activeTab === id ? 'bg-black text-white' : 'bg-white border border-slate-200 text-slate-600'}`}><Icon className="w-4 h-4" />{label}</button>)}</nav>
@@ -298,7 +454,26 @@ export default function AdminPortalView({ departments: fallbackDepartments, onEx
         )}
 
         {activeTab === 'leaderboard' && (
-          <section className="grid grid-cols-1 xl:grid-cols-2 gap-5"><RankingCard title="อันดับราย BU" icon={<Building2 className="w-5 h-5 text-[#00914E]" />} rows={buRanking} showBU={false} /><RankingCard title="อันดับรายฝ่าย" icon={<Trophy className="w-5 h-5 text-[#00914E]" />} rows={departmentRanking} showBU /></section>
+          <section className="space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-black text-black">Ranking · {selectedPeriod}</p>
+                <p className="text-xs text-slate-400 mt-1">BU ใช้ค่าเฉลี่ยต่อคน · ฝ่ายใช้ผลรวมค่าเฉลี่ยรายพนักงาน · ข้าม BU เฉพาะที่กำหนดใน DepartmentMapping</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={exportRanking} className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-bold flex items-center gap-2 cursor-pointer">
+                  <Download className="w-4 h-4" />Export Ranking
+                </button>
+                <button disabled={isSavingRanking} onClick={() => void handleSaveRanking()} className="px-3 py-2 rounded-lg bg-[#00914E] text-white text-sm font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50">
+                  <Save className="w-4 h-4" />{isSavingRanking ? 'กำลังบันทึก...' : 'บันทึกลง Google Sheets'}
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+              <RankingCard title="อันดับราย BU" icon={<Building2 className="w-5 h-5 text-[#00914E]" />} rows={buRanking} showBU={false} metric="average" />
+              <RankingCard title="อันดับรายฝ่าย" icon={<Trophy className="w-5 h-5 text-[#00914E]" />} rows={departmentRanking} showBU metric="total" />
+            </div>
+          </section>
         )}
       </main>
 
@@ -311,4 +486,4 @@ function Loading() { return <div className="bg-white rounded-2xl p-16 text-cente
 function Empty({ text }: { text: string }) { return <div className="bg-white rounded-2xl p-16 text-center text-slate-400 text-sm font-bold">{text}</div>; }
 function DataBox({ label, value, className = 'bg-slate-50 text-black' }: { label: string; value: string; className?: string }) { return <div className={`rounded-xl p-3 ${className}`}><p className="text-xs text-slate-500 font-bold">{label}</p><p className="text-xl font-black mt-1">{value}</p></div>; }
 function ModalInput({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; type?: string }) { return <label className="block text-sm font-bold text-slate-600">{label}<input type={type} value={value} onChange={(event) => onChange(event.target.value)} className="w-full mt-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm outline-none focus:border-[#00914E]" required /></label>; }
-function RankingCard({ title, icon, rows, showBU }: { title: string; icon: React.ReactNode; rows: Array<{ id: string; buId: string; memberCount: number; participantCount: number; participationRate: number; averageSteps: number }>; showBU: boolean }) { return <article className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm"><h3 className="font-black text-black flex items-center gap-2">{icon}{title}</h3><p className="text-xs text-slate-400 mt-1">ใช้ค่าเฉลี่ยรายพนักงานจากรายการที่ผ่านตรวจ</p><div className="space-y-3 mt-5">{rows.map((row, index) => <div key={`${row.buId}:${row.id}`} className="flex justify-between gap-3 bg-slate-50 rounded-xl p-3"><div><p className="font-bold text-black text-sm">#{index + 1} {row.id}</p><p className="text-xs text-slate-400 mt-1">{showBU ? `BU ${row.buId} · ` : ''}{row.participantCount}/{row.memberCount} คน · {row.participationRate}%</p></div><div className="text-right"><p className="font-black text-[#00914E] text-sm">{row.averageSteps.toLocaleString()}</p><p className="text-xs text-slate-400">ก้าว/วัน</p></div></div>)}{rows.length === 0 && <p className="text-sm text-slate-400 text-center py-8">ยังไม่มีข้อมูล</p>}</div></article>; }
+function RankingCard({ title, icon, rows, showBU, metric }: { title: string; icon: React.ReactNode; rows: Array<{ id: string; buId: string; memberCount: number; participantCount: number; participationRate: number; averageSteps: number; totalSteps: number }>; showBU: boolean; metric: 'average' | 'total' }) { return <article className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm"><h3 className="font-black text-black flex items-center gap-2">{icon}{title}</h3><p className="text-xs text-slate-400 mt-1">{metric === 'total' ? 'จัดอันดับจากผลรวมค่าเฉลี่ยรายพนักงานที่ผ่านตรวจ' : 'จัดอันดับจากค่าเฉลี่ยรายพนักงานที่ผ่านตรวจ'}</p><div className="space-y-3 mt-5">{rows.map((row, index) => <div key={`${row.buId}:${row.id}`} className="flex justify-between gap-3 bg-slate-50 rounded-xl p-3"><div><p className="font-bold text-black text-sm">#{index + 1} {row.id}</p><p className="text-xs text-slate-400 mt-1">{showBU ? `BU ${row.buId} · ` : ''}{row.participantCount}/{row.memberCount} คน · {row.participationRate}%</p></div><div className="text-right"><p className="font-black text-[#00914E] text-sm">{(metric === 'total' ? row.totalSteps : row.averageSteps).toLocaleString()}</p><p className="text-xs text-slate-400">{metric === 'total' ? 'ก้าวรวม' : 'ก้าว/วัน'}</p>{metric === 'total' && <p className="text-[10px] text-slate-400 mt-1">เฉลี่ย {row.averageSteps.toLocaleString()}/คน</p>}</div></div>)}{rows.length === 0 && <p className="text-sm text-slate-400 text-center py-8">ยังไม่มีข้อมูล</p>}</div></article>; }

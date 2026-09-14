@@ -1,6 +1,18 @@
-# Thairath Step Up & Health Up — v2.4
+# Thairath Step Up & Health Up — v2.5.2
 
 ระบบกิจกรรมสุขภาพสำหรับบันทึก **ค่าเฉลี่ยจำนวนก้าวต่อวันของแต่ละสัปดาห์** พร้อม Screenshot, Tesseract.js OCR, Google Drive Evidence, Approval Workflow, Multi-BU Dashboard และ Leaderboard
+
+## สิ่งที่ปรับใน v2.5.2
+
+- Department Ranking เปลี่ยนจากค่าเฉลี่ยของพนักงานในฝ่าย เป็น **ผลรวมของค่าเฉลี่ยรายพนักงาน**
+- พนักงานยังส่งค่าเฉลี่ยก้าว/วันเหมือนเดิม; ถ้า A = 8,000 และ B = 6,000 ทีมได้ 14,000 ก้าว
+- ฝ่ายชื่อเดียวกันแต่คนละ BU **ไม่รวมกันโดยอัตโนมัติ**
+- การรวมข้าม BU เกิดเฉพาะรายการที่ Admin กำหนดใน `DepartmentMapping`
+- `DepartmentMapping.sourceBU` รองรับ `*` = ทุก BU หรือระบุ BU ต้นทางเพื่อควบคุมเฉพาะจุด
+- ค่าเริ่มต้น: ไทยรัฐบันเทิง→TVB, จป./Safety→TR, การตลาด→TVB, Platform Management→TVB, Thairath Creative→VG3
+- Admin เพิ่ม Export Ranking CSV และบันทึก Snapshot ลง `RankingHistory`
+- BU Ranking ยังใช้ค่าเฉลี่ยต่อคนเหมือนเดิม
+
 
 ## สิ่งที่ปรับใน v2.4
 

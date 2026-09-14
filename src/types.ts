@@ -41,7 +41,8 @@ export interface DepartmentInfo {
   nameTh: string;
   nameEn: string;
   participationRate: number;
-  averageStepsPerPerson: number; // average of each participant's verified weekly averages
+  averageStepsPerPerson: number; // transparency metric; department ranking uses totalSteps
+  totalSteps: number; // sum of each participant's verified period average
   memberCount?: number;
   participantCount?: number;
   submittedWeeks?: number;
@@ -55,6 +56,7 @@ export interface BusinessUnitInfo {
   nameEn: string;
   participationRate: number;
   averageStepsPerPerson: number;
+  totalSteps?: number;
   memberCount: number;
   participantCount: number;
   submittedWeeks?: number;
@@ -66,6 +68,46 @@ export interface LeaderboardData {
   departments: DepartmentInfo[];
   businessUnits: BusinessUnitInfo[];
   generatedAt: string;
+}
+
+export interface DepartmentMappingRule {
+  sourceBU?: string;
+  sourceDepartmentId: string;
+  canonicalDepartmentId: string;
+  canonicalBU: string;
+  active: boolean;
+  note?: string;
+}
+
+
+export interface EmployeeRankingOverride {
+  employeeId: string;
+  targetDepartmentId: string;
+  targetBU?: string;
+  active: boolean;
+  note?: string;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export interface RankingSnapshotRow {
+  rankingType: 'BU' | 'DEPARTMENT';
+  rank: number;
+  buId: string;
+  departmentId?: string;
+  memberCount: number;
+  participantCount: number;
+  participationRate: number;
+  totalSteps: number;
+  averageStepsPerPerson: number;
+  metricUsed: 'AVERAGE_STEPS_PER_PERSON' | 'TOTAL_STEPS';
+}
+
+export interface RankingSnapshotInput {
+  periodLabel: string;
+  monthFilter: string;
+  weekFilter: string;
+  rows: RankingSnapshotRow[];
 }
 
 export interface ActiveUser {

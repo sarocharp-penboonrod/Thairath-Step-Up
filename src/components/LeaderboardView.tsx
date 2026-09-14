@@ -39,7 +39,7 @@ export default function LeaderboardView({
   onRefresh
 }: LeaderboardViewProps) {
   const [mode, setMode] = useState<RankingMode>('bu');
-  const [selectedBU, setSelectedBU] = useState(activeUser.buId || 'all');
+  const [selectedBU, setSelectedBU] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   const buRows = useMemo(() => {
@@ -54,20 +54,20 @@ export default function LeaderboardView({
     return [...departments]
       .filter((item) => selectedBU === 'all' || item.buId === selectedBU)
       .filter((item) => !search || item.nameTh.toLowerCase().includes(search) || item.id.toLowerCase().includes(search))
-      .sort((a, b) => b.averageStepsPerPerson - a.averageStepsPerPerson);
+      .sort((a, b) => b.totalSteps - a.totalSteps || b.participationRate - a.participationRate);
   }, [departments, selectedBU, searchTerm]);
 
   const rows = mode === 'bu' ? buRows : departmentRows;
   const currentRank = mode === 'bu'
     ? buRows.findIndex((item) => item.id === activeUser.buId) + 1
-    : departmentRows.findIndex((item) => item.id === activeUser.departmentId && item.buId === activeUser.buId) + 1;
+    : departmentRows.findIndex((item) => item.id === activeUser.departmentId) + 1;
 
   return (
     <div className="space-y-6">
       <section className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl md:text-2xl font-black text-black">Leaderboard ค่าเฉลี่ยก้าว</h2>
-          <p className="text-sm text-slate-500 mt-2">จัดอันดับจากค่าเฉลี่ยรายพนักงานของรายการที่ผ่านตรวจในเดือนที่เลือก</p>
+          <h2 className="text-xl md:text-2xl font-black text-black">Leaderboard Step Up</h2>
+          <p className="text-sm text-slate-500 mt-2">อันดับ BU ใช้ค่าเฉลี่ยต่อคน · อันดับฝ่ายใช้ก้าวรวมของทีม · ข้าม BU เฉพาะทีมที่ Admin กำหนด</p>
         </div>
         <button onClick={onRefresh} disabled={isRefreshing} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 font-bold text-sm px-4 py-3 rounded-xl cursor-pointer">
           <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -98,7 +98,7 @@ export default function LeaderboardView({
       {currentRank > 0 && (
         <section className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#00914E] text-white flex items-center justify-center"><Trophy className="w-5 h-5" /></div>
-          <div><p className="text-sm font-black text-black">อันดับของคุณในมุมมองนี้: #{currentRank}</p><p className="text-sm text-slate-600 mt-1">ชวนทีมส่งผลอย่างสม่ำเสมอ เพื่อเพิ่มทั้งค่าเฉลี่ยและ Participation Rate</p></div>
+          <div><p className="text-sm font-black text-black">อันดับของคุณในมุมมองนี้: #{currentRank}</p><p className="text-sm text-slate-600 mt-1">{mode === 'department' ? 'ทุกคนที่ส่งผลและผ่านตรวจจะช่วยเพิ่มก้าวรวมของทีมโดยตรง' : 'ชวนทีมส่งผลอย่างสม่ำเสมอ เพื่อเพิ่มทั้งค่าเฉลี่ยและ Participation Rate'}</p></div>
         </section>
       )}
 
@@ -111,7 +111,7 @@ export default function LeaderboardView({
                 <th className="p-4 text-left">{mode === 'bu' ? 'BU' : 'ฝ่าย / BU'}</th>
                 <th className="p-4 text-center">ผู้เข้าร่วม</th>
                 <th className="p-4 text-center">Participation</th>
-                <th className="p-4 text-right">ค่าเฉลี่ยก้าว/วัน</th>
+                <th className="p-4 text-right">{mode === 'department' ? 'ก้าวรวมของทีม' : 'ค่าเฉลี่ยก้าว/วัน'}</th>
                 <th className="p-4 text-left">สถานะ</th>
               </tr>
             </thead>
@@ -119,14 +119,18 @@ export default function LeaderboardView({
               {rows.map((row, index) => {
                 const isCurrent = mode === 'bu'
                   ? row.id === activeUser.buId
-                  : row.id === activeUser.departmentId && 'buId' in row && row.buId === activeUser.buId;
+                  : row.id === activeUser.departmentId;
                 return (
                   <tr key={mode === 'bu' ? row.id : `${(row as DepartmentInfo).buId}:${row.id}`} className={isCurrent ? 'bg-emerald-50/70' : 'hover:bg-slate-50'}>
                     <td className="p-4 text-center"><span className={`inline-flex w-9 h-9 rounded-full items-center justify-center font-black ${index < 3 ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{index + 1}</span></td>
                     <td className="p-4"><p className="font-black text-black">{row.nameTh}</p>{mode === 'department' && <p className="text-xs text-slate-400 mt-1">BU {(row as DepartmentInfo).buId}</p>}</td>
                     <td className="p-4 text-center font-bold">{row.participantCount || 0}/{row.memberCount || 0}</td>
                     <td className="p-4 text-center font-bold">{row.participationRate}%</td>
-                    <td className="p-4 text-right"><p className="text-lg font-black text-[#00914E]">{row.averageStepsPerPerson.toLocaleString()}</p><p className="text-xs text-slate-400">ก้าว/วัน</p></td>
+                    <td className="p-4 text-right">
+                      <p className="text-lg font-black text-[#00914E]">{(mode === 'department' ? (row as DepartmentInfo).totalSteps : row.averageStepsPerPerson).toLocaleString()}</p>
+                      <p className="text-xs text-slate-400">{mode === 'department' ? 'ก้าวรวม' : 'ก้าว/วัน'}</p>
+                      {mode === 'department' && <p className="text-[10px] text-slate-400 mt-1">เฉลี่ย {row.averageStepsPerPerson.toLocaleString()}/คน</p>}
+                    </td>
                     <td className="p-4 text-slate-500">{row.statusText || 'ข้อมูลจากระบบ'}</td>
                   </tr>
                 );

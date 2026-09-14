@@ -1,5 +1,5 @@
 /**
- * Thairath Step Up & Health Up — v2.4.5 Google Sheets Backend
+ * Thairath Step Up & Health Up — v2.5.2 Google Sheets Backend
  * Deploy as Web App: Execute as Me / Who has access: Anyone.
  */
 
@@ -7,6 +7,9 @@ const CONFIG = {
   SPREADSHEET_ID: '1YgxxKpP74EkzfzAJn2wnTXamrYJ9-aBZsKwcBo7v3Dk',
   EMPLOYEE_SHEET: 'Employees',
   LOG_SHEET: 'StepLogs',
+  DEPARTMENT_MAPPING_SHEET: 'DepartmentMapping',
+  EMPLOYEE_RANKING_OVERRIDE_SHEET: 'EmployeeRankingOverride',
+  RANKING_HISTORY_SHEET: 'RankingHistory',
   TIMEZONE: 'Asia/Bangkok',
   WEEKLY_TARGET: 7000,
   OCR_AUTO_VERIFY_MIN_CONFIDENCE: 60,
@@ -27,6 +30,21 @@ const LOG_HEADERS = [
   'imageName', 'submittedAt', 'createdAt', 'updatedAt', 'imageFileId', 'imageUrl',
   'ocrText', 'ocrSteps', 'ocrConfidence', 'verificationStatus', 'reviewNote',
   'reviewedBy', 'reviewedAt', 'buIdAtSubmission', 'departmentIdAtSubmission'
+];
+
+const DEPARTMENT_MAPPING_HEADERS = [
+  'sourceBU', 'sourceDepartmentId', 'canonicalDepartmentId', 'canonicalBU', 'active', 'note'
+];
+
+const EMPLOYEE_RANKING_OVERRIDE_HEADERS = [
+  'employeeId', 'targetDepartmentId', 'targetBU', 'active', 'note', 'updatedBy', 'updatedAt'
+];
+
+const RANKING_HISTORY_HEADERS = [
+  'snapshotId', 'snapshotAt', 'periodLabel', 'monthFilter', 'weekFilter',
+  'rankingType', 'rank', 'buId', 'departmentId', 'memberCount',
+  'participantCount', 'participationRate', 'totalSteps',
+  'averageStepsPerPerson', 'metricUsed', 'generatedBy'
 ];
 
 const CAMPAIGN_WEEKS = [
@@ -57,7 +75,7 @@ const CAMPAIGN_WEEKS = [
 
 function doGet() {
   setup_();
-  return json_({ ok: true, data: { service: 'thairath-step-up-v2.4.5-backend', ready: true } });
+  return json_({ ok: true, data: { service: 'thairath-step-up-v2.5.2-backend', ready: true } });
 }
 
 function doPost(e) {
@@ -99,6 +117,15 @@ function doPost(e) {
         return json_({ ok: true, data: { deleted: true } });
       case 'calculateLeaderboard':
         return json_({ ok: true, data: calculateLeaderboard_(Number(body.currentMonth) || 1, Boolean(body.forceRefresh)) });
+      case 'fetchDepartmentMapping':
+        requireAdmin_(adminContext);
+        return json_({ ok: true, data: fetchDepartmentMapping_() });
+      case 'fetchEmployeeRankingOverrides':
+        requireAdmin_(adminContext);
+        return json_({ ok: true, data: fetchEmployeeRankingOverrides_() });
+      case 'saveRankingSnapshot':
+        requireAdmin_(adminContext);
+        return json_({ ok: true, data: saveRankingSnapshot_(body.snapshot, adminContext) });
       case 'fetchAllUsers':
         requireAdmin_(adminContext);
         return json_({ ok: true, data: filterUsersForAdmin_(fetchAllUsers_(), adminContext) });
@@ -145,6 +172,9 @@ function ss_() {
 function setup_() {
   ensureSheet_(CONFIG.EMPLOYEE_SHEET, EMPLOYEE_HEADERS);
   ensureSheet_(CONFIG.LOG_SHEET, LOG_HEADERS);
+  ensureSheet_(CONFIG.DEPARTMENT_MAPPING_SHEET, DEPARTMENT_MAPPING_HEADERS);
+  ensureSheet_(CONFIG.EMPLOYEE_RANKING_OVERRIDE_SHEET, EMPLOYEE_RANKING_OVERRIDE_HEADERS);
+  ensureSheet_(CONFIG.RANKING_HISTORY_SHEET, RANKING_HISTORY_HEADERS);
 }
 
 function ensureSheet_(sheetName, headers) {
@@ -306,7 +336,7 @@ function syncWeeklyTarget_() {
   range.setValues(range.getValues().map(function() { return [CONFIG.WEEKLY_TARGET]; }));
 }
 
-// Run this public function once from Apps Script after deploying v2.4.5.
+// Run this public function once from Apps Script after deploying v2.5.2.
 // It fills only blank/UNASSIGNED BU cells and preserves manual overrides.
 function syncEmployeeBuIdsFromEmployeeId() {
   setup_();
@@ -380,7 +410,7 @@ function syncEmployeeBuIdsFromEmployeeId_() {
   return {
     updatedEmployees: updatedEmployees,
     updatedStepLogs: updatedLogs,
-    mappingRulesVersion: 'v2.4.5'
+    mappingRulesVersion: 'v2.5.2'
   };
 }
 
@@ -852,7 +882,159 @@ function deleteUserLog_(logId, adminContext) {
   }
 }
 
-function leaderboardCacheKey_(currentMonth) { return 'leaderboard_v24_' + Number(currentMonth || 1); }
+
+function boolean_(value, fallback) {
+  if (typeof value === 'boolean') return value;
+  const text = normalizeText_(value);
+  if (!text) return fallback;
+  if (['false', '0', 'no', 'inactive'].indexOf(text) >= 0) return false;
+  if (['true', '1', 'yes', 'active'].indexOf(text) >= 0) return true;
+  return fallback;
+}
+
+function fetchDepartmentMapping_() {
+  return readObjects_(CONFIG.DEPARTMENT_MAPPING_SHEET, DEPARTMENT_MAPPING_HEADERS)
+    .filter(function(row) {
+      return normalizeId_(row.sourceDepartmentId) && boolean_(row.active, true);
+    })
+    .map(function(row) {
+      return {
+        sourceBU: normalizeId_(row.sourceBU).toUpperCase() || '*',
+        sourceDepartmentId: normalizeId_(row.sourceDepartmentId),
+        canonicalDepartmentId: normalizeId_(row.canonicalDepartmentId) || normalizeId_(row.sourceDepartmentId),
+        canonicalBU: normalizeId_(row.canonicalBU).toUpperCase(),
+        active: boolean_(row.active, true),
+        note: String(row.note || '')
+      };
+    });
+}
+
+function fetchEmployeeRankingOverrides_() {
+  return readObjects_(CONFIG.EMPLOYEE_RANKING_OVERRIDE_SHEET, EMPLOYEE_RANKING_OVERRIDE_HEADERS)
+    .filter(function(row) {
+      return canonicalEmployeeKey_(row.employeeId) && normalizeId_(row.targetDepartmentId) && boolean_(row.active, true);
+    })
+    .map(function(row) {
+      return {
+        employeeId: normalizeId_(row.employeeId),
+        targetDepartmentId: normalizeId_(row.targetDepartmentId),
+        targetBU: normalizeId_(row.targetBU).toUpperCase(),
+        active: boolean_(row.active, true),
+        note: String(row.note || ''),
+        updatedBy: String(row.updatedBy || ''),
+        updatedAt: String(row.updatedAt || '')
+      };
+    });
+}
+
+function departmentRuleKey_(sourceBU, departmentId) {
+  return (normalizeId_(sourceBU).toUpperCase() || '*') + '::' + normalizeText_(departmentId);
+}
+
+function buildDepartmentGrouping_(users) {
+  const ruleBySource = {};
+  fetchDepartmentMapping_().forEach(function(rule) {
+    const sourceBU = normalizeId_(rule.sourceBU).toUpperCase() || '*';
+    ruleBySource[departmentRuleKey_(sourceBU, rule.sourceDepartmentId)] = rule;
+  });
+
+  const overrideByEmployee = {};
+  fetchEmployeeRankingOverrides_().forEach(function(item) {
+    const key = canonicalEmployeeKey_(item.employeeId);
+    if (key) overrideByEmployee[key] = item;
+  });
+
+  return {
+    ruleBySource: ruleBySource,
+    overrideByEmployee: overrideByEmployee
+  };
+}
+
+function findDepartmentRule_(grouping, departmentId, rawBuId) {
+  const department = normalizeId_(departmentId) || 'UNASSIGNED';
+  const bu = normalizeId_(rawBuId).toUpperCase() || 'UNASSIGNED';
+  return grouping.ruleBySource[departmentRuleKey_(bu, department)] ||
+    grouping.ruleBySource[departmentRuleKey_('*', department)] ||
+    null;
+}
+
+function resolveDepartmentGroup_(grouping, departmentId, rawBuId, employeeIdOrEmail) {
+  const override = grouping.overrideByEmployee[canonicalEmployeeKey_(employeeIdOrEmail)] || null;
+  const rawDepartment = normalizeId_(override && override.targetDepartmentId) || normalizeId_(departmentId) || 'UNASSIGNED';
+  const rawBU = normalizeId_(override && override.targetBU).toUpperCase() || normalizeId_(rawBuId).toUpperCase() || 'UNASSIGNED';
+  const rule = findDepartmentRule_(grouping, rawDepartment, rawBU);
+  const canonicalDepartment = normalizeId_(rule && rule.canonicalDepartmentId) || rawDepartment;
+  const canonicalBU = normalizeId_(rule && rule.canonicalBU).toUpperCase() || rawBU;
+
+  // Important v2.5.2 rule:
+  // Same department names in different BUs stay separate by default.
+  // They merge only when DepartmentMapping explicitly resolves them to the same
+  // canonical department + canonical BU.
+  return {
+    key: normalizeText_(canonicalBU) + '::' + normalizeText_(canonicalDepartment),
+    departmentId: canonicalDepartment,
+    buId: canonicalBU
+  };
+}
+
+function sum_(values) {
+  return (values || []).map(Number).filter(function(value) {
+    return Number.isFinite(value);
+  }).reduce(function(sum, value) {
+    return sum + value;
+  }, 0);
+}
+
+function saveRankingSnapshot_(snapshot, adminContext) {
+  const payload = snapshot || {};
+  const rows = Array.isArray(payload.rows) ? payload.rows.slice(0, 1000) : [];
+  if (!rows.length) throw new Error('ไม่มีข้อมูล Ranking สำหรับบันทึก');
+
+  const sheet = ensureSheet_(CONFIG.RANKING_HISTORY_SHEET, RANKING_HISTORY_HEADERS);
+  const snapshotId = 'RANK-' + Utilities.formatDate(new Date(), CONFIG.TIMEZONE, 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 8);
+  const snapshotAt = now_();
+  const periodLabel = String(payload.periodLabel || '');
+  const monthFilter = String(payload.monthFilter || 'all');
+  const weekFilter = String(payload.weekFilter || 'all');
+  const generatedBy = String(adminContext.displayName || 'Admin');
+
+  const values = rows.map(function(row) {
+    const rankingType = String(row.rankingType || '').toUpperCase() === 'DEPARTMENT' ? 'DEPARTMENT' : 'BU';
+    const buId = normalizeId_(row.buId).toUpperCase() || 'UNASSIGNED';
+    if (!adminCanAccessBU_(adminContext, buId)) {
+      throw new Error('ไม่มีสิทธิ์บันทึก Ranking ของ BU ' + buId);
+    }
+    return [
+      snapshotId,
+      snapshotAt,
+      periodLabel,
+      monthFilter,
+      weekFilter,
+      rankingType,
+      number_(row.rank, 0),
+      buId,
+      rankingType === 'DEPARTMENT' ? normalizeId_(row.departmentId) : '',
+      number_(row.memberCount, 0),
+      number_(row.participantCount, 0),
+      number_(row.participationRate, 0),
+      number_(row.totalSteps, 0),
+      number_(row.averageStepsPerPerson, 0),
+      rankingType === 'DEPARTMENT' ? 'TOTAL_STEPS' : 'AVERAGE_STEPS_PER_PERSON',
+      generatedBy
+    ];
+  });
+
+  const startRow = sheet.getLastRow() + 1;
+  const requiredLastRow = startRow + values.length - 1;
+  if (requiredLastRow > sheet.getMaxRows()) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), requiredLastRow - sheet.getMaxRows());
+  }
+  sheet.getRange(startRow, 1, values.length, RANKING_HISTORY_HEADERS.length).setValues(values);
+  return { snapshotId: snapshotId, rowsSaved: values.length };
+}
+
+
+function leaderboardCacheKey_(currentMonth) { return 'leaderboard_v251_' + Number(currentMonth || 1); }
 
 function invalidateLeaderboardCache_() {
   const cache = CacheService.getScriptCache();
@@ -876,6 +1058,7 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
     return Number(log.week) === Number(currentMonth) && isVerifiedStatus_(log.verificationStatus);
   });
 
+  const grouping = buildDepartmentGrouping_(users);
   const usersByKey = {};
   users.forEach(function(user) {
     const idKey = canonicalEmployeeKey_(user.employeeId);
@@ -884,90 +1067,122 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
     if (emailKey) usersByKey[emailKey] = user;
   });
 
-  // Keep one average per employee inside each organisation snapshot.
-  // AUTO_VERIFIED and APPROVED are both final verified states.
-  const buParticipantValues = {};
-  const departmentParticipantValues = {};
-  const buIds = {};
-  const departmentKeys = {};
+  // BU ranking stays average-based.
+  // Department ranking uses TOTAL_STEPS = sum of each employee's verified period average.
+  const buGroups = {};
+  const departmentGroups = {};
 
   users.forEach(function(user) {
-    const buId = normalizeId_(user.buId) || 'UNASSIGNED';
-    const departmentId = normalizeId_(user.departmentId) || 'UNASSIGNED';
-    buIds[buId] = true;
-    departmentKeys[buId + '::' + departmentId] = { buId: buId, departmentId: departmentId };
+    const employeeKey = canonicalEmployeeKey_(user.employeeId) || canonicalEmployeeKey_(user.email);
+    if (!employeeKey) return;
+
+    const rawBU = resolveBuId_(user.employeeId, user.buId);
+    if (!buGroups[rawBU]) {
+      buGroups[rawBU] = { id: rawBU, memberIds: {}, participantValues: {} };
+    }
+    buGroups[rawBU].memberIds[employeeKey] = true;
+
+    const departmentGroup = resolveDepartmentGroup_(grouping, user.departmentId, rawBU, user.employeeId || user.email);
+    if (!departmentGroups[departmentGroup.key]) {
+      departmentGroups[departmentGroup.key] = {
+        id: departmentGroup.departmentId,
+        buId: departmentGroup.buId,
+        memberIds: {},
+        participantValues: {}
+      };
+    }
+    departmentGroups[departmentGroup.key].memberIds[employeeKey] = true;
   });
 
   logs.forEach(function(log) {
     const rawKey = canonicalEmployeeKey_(log.employeeId) || canonicalEmployeeKey_(log.userEmail);
-    const matchedUser = usersByKey[canonicalEmployeeKey_(log.employeeId)] || usersByKey[canonicalEmployeeKey_(log.userEmail)] || null;
+    const matchedUser = usersByKey[canonicalEmployeeKey_(log.employeeId)] ||
+      usersByKey[canonicalEmployeeKey_(log.userEmail)] ||
+      null;
     const employeeKey = matchedUser
       ? (canonicalEmployeeKey_(matchedUser.employeeId) || canonicalEmployeeKey_(matchedUser.email))
       : rawKey;
     if (!employeeKey) return;
 
-    const buId = assignedOrgValue_(log.buIdAtSubmission) || normalizeId_(matchedUser && matchedUser.buId) || deriveBuIdFromEmployeeId_(log.employeeId || log.userEmail) || 'UNASSIGNED';
-    const departmentId = assignedOrgValue_(log.departmentIdAtSubmission) || normalizeId_(matchedUser && matchedUser.departmentId) || 'UNASSIGNED';
-    const departmentKey = buId + '::' + departmentId;
+    const rawBU = assignedOrgValue_(log.buIdAtSubmission) ||
+      normalizeId_(matchedUser && matchedUser.buId) ||
+      deriveBuIdFromEmployeeId_(log.employeeId || log.userEmail) ||
+      'UNASSIGNED';
+    const rawDepartment = assignedOrgValue_(log.departmentIdAtSubmission) ||
+      normalizeId_(matchedUser && matchedUser.departmentId) ||
+      'UNASSIGNED';
     const steps = number_(log.steps, 0);
     if (!(steps > 0)) return;
 
-    buIds[buId] = true;
-    departmentKeys[departmentKey] = { buId: buId, departmentId: departmentId };
+    if (!buGroups[rawBU]) {
+      buGroups[rawBU] = { id: rawBU, memberIds: {}, participantValues: {} };
+    }
+    if (!buGroups[rawBU].participantValues[employeeKey]) buGroups[rawBU].participantValues[employeeKey] = [];
+    buGroups[rawBU].participantValues[employeeKey].push(steps);
 
-    if (!buParticipantValues[buId]) buParticipantValues[buId] = {};
-    if (!buParticipantValues[buId][employeeKey]) buParticipantValues[buId][employeeKey] = [];
-    buParticipantValues[buId][employeeKey].push(steps);
-
-    if (!departmentParticipantValues[departmentKey]) departmentParticipantValues[departmentKey] = {};
-    if (!departmentParticipantValues[departmentKey][employeeKey]) departmentParticipantValues[departmentKey][employeeKey] = [];
-    departmentParticipantValues[departmentKey][employeeKey].push(steps);
+    const departmentGroup = resolveDepartmentGroup_(grouping, rawDepartment, rawBU, matchedUser ? (matchedUser.employeeId || matchedUser.email) : (log.employeeId || log.userEmail));
+    if (!departmentGroups[departmentGroup.key]) {
+      departmentGroups[departmentGroup.key] = {
+        id: departmentGroup.departmentId,
+        buId: departmentGroup.buId,
+        memberIds: {},
+        participantValues: {}
+      };
+    }
+    if (!departmentGroups[departmentGroup.key].participantValues[employeeKey]) {
+      departmentGroups[departmentGroup.key].participantValues[employeeKey] = [];
+    }
+    departmentGroups[departmentGroup.key].participantValues[employeeKey].push(steps);
   });
 
-  const businessUnits = Object.keys(buIds).map(function(buId) {
-    const members = users.filter(function(user) {
-      return normalizeText_(user.buId) === normalizeText_(buId);
-    });
-    const valuesByEmployee = buParticipantValues[buId] || {};
-    const participantAverages = Object.keys(valuesByEmployee).map(function(employeeKey) {
-      return average_(valuesByEmployee[employeeKey]);
+  const businessUnits = Object.keys(buGroups).map(function(key) {
+    const group = buGroups[key];
+    const participantAverages = Object.keys(group.participantValues).map(function(employeeKey) {
+      return average_(group.participantValues[employeeKey]);
     }).filter(function(value) { return Number.isFinite(value) && value > 0; });
+    const memberCount = Object.keys(group.memberIds).length;
     return {
-      id: buId,
-      nameTh: buId,
-      nameEn: buId,
-      participationRate: members.length ? Math.round(participantAverages.length / members.length * 100) : 0,
+      id: group.id,
+      nameTh: group.id,
+      nameEn: group.id,
+      participationRate: memberCount ? Math.round(participantAverages.length / memberCount * 100) : 0,
       averageStepsPerPerson: average_(participantAverages),
-      memberCount: members.length,
+      totalSteps: sum_(participantAverages),
+      memberCount: memberCount,
       participantCount: participantAverages.length,
       status: 'stable',
-      statusText: 'ข้อมูลจากระบบ'
+      statusText: 'BU Ranking ใช้ค่าเฉลี่ยต่อคน'
     };
-  }).sort(function(a, b) { return b.averageStepsPerPerson - a.averageStepsPerPerson; });
+  }).sort(function(a, b) {
+    if (b.averageStepsPerPerson !== a.averageStepsPerPerson) return b.averageStepsPerPerson - a.averageStepsPerPerson;
+    return b.participationRate - a.participationRate;
+  });
 
-  const departments = Object.keys(departmentKeys).map(function(key) {
-    const item = departmentKeys[key];
-    const members = users.filter(function(user) {
-      return normalizeText_(user.buId) === normalizeText_(item.buId) &&
-        normalizeText_(user.departmentId) === normalizeText_(item.departmentId);
-    });
-    const valuesByEmployee = departmentParticipantValues[key] || {};
-    const participantAverages = Object.keys(valuesByEmployee).map(function(employeeKey) {
-      return average_(valuesByEmployee[employeeKey]);
+  const departments = Object.keys(departmentGroups).map(function(key) {
+    const group = departmentGroups[key];
+    const participantAverages = Object.keys(group.participantValues).map(function(employeeKey) {
+      return average_(group.participantValues[employeeKey]);
     }).filter(function(value) { return Number.isFinite(value) && value > 0; });
+    const memberCount = Object.keys(group.memberIds).length;
+    const totalSteps = sum_(participantAverages);
     return {
-      id: item.departmentId,
-      buId: item.buId,
-      nameTh: item.departmentId,
-      nameEn: item.departmentId,
-      participationRate: members.length ? Math.round(participantAverages.length / members.length * 100) : 0,
+      id: group.id,
+      buId: group.buId,
+      nameTh: group.id,
+      nameEn: group.id,
+      participationRate: memberCount ? Math.round(participantAverages.length / memberCount * 100) : 0,
       averageStepsPerPerson: average_(participantAverages),
-      memberCount: members.length,
+      totalSteps: totalSteps,
+      memberCount: memberCount,
       participantCount: participantAverages.length,
       status: 'stable',
-      statusText: 'ข้อมูลจากระบบ'
+      statusText: 'รวม ' + totalSteps.toLocaleString() + ' ก้าว จาก ' + participantAverages.length + ' คน'
     };
-  }).sort(function(a, b) { return b.averageStepsPerPerson - a.averageStepsPerPerson; });
+  }).sort(function(a, b) {
+    if (b.totalSteps !== a.totalSteps) return b.totalSteps - a.totalSteps;
+    if (b.participationRate !== a.participationRate) return b.participationRate - a.participationRate;
+    return String(a.nameTh).localeCompare(String(b.nameTh));
+  });
 
   const result = {
     businessUnits: businessUnits,
