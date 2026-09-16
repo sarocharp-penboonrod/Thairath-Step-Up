@@ -1,8 +1,16 @@
-# Thairath Step Up & Health Up — v2.5.5
+# Thairath Step Up & Health Up — v2.5.6
 
 ระบบกิจกรรมสุขภาพสำหรับบันทึก **ค่าเฉลี่ยจำนวนก้าวต่อวันของแต่ละสัปดาห์** พร้อม Screenshot, Tesseract.js OCR, Google Drive Evidence, Approval Workflow, Multi-BU Dashboard และ Leaderboard
 
 
+
+## สิ่งที่ปรับใน v2.5.6
+
+- เปลี่ยน Department Ranking จากเดิมที่เฉลี่ยผลหลายสัปดาห์ของพนักงานก่อน แล้วค่อยรวม เป็น **บวกค่าก้าวเฉลี่ยของแต่ละสัปดาห์โดยตรง**
+- ตัวอย่าง A มี W1-W4 = 8,000 + 9,000 + 10,000 + 11,000 และ B = 6,000 + 7,000 + 8,000 + 9,000 คะแนนฝ่าย = **68,000**
+- นับไม่เกิน 1 ผลต่อพนักงานต่อ campaign week; ถ้ามี verified log ซ้ำในสัปดาห์เดียว ใช้รายการที่ผ่านตรวจล่าสุด
+- BU Ranking ยังคง Logic เดิมแบบค่าเฉลี่ยต่อคน
+- DepartmentMapping, EmployeeRankingOverride, Participation Ranking และ Sort เดิมยังทำงานเหมือน v2.5.5
 
 ## สิ่งที่ปรับใน v2.5.5
 

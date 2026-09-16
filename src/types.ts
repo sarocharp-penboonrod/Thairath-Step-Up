@@ -18,6 +18,8 @@ export interface StepLog {
   reviewedBy?: string;
   reviewedAt?: string;
   submittedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
   buIdAtSubmission?: string;
   departmentIdAtSubmission?: string;
 }
@@ -42,7 +44,7 @@ export interface DepartmentInfo {
   nameEn: string;
   participationRate: number;
   averageStepsPerPerson: number; // transparency metric; department ranking uses totalSteps
-  totalSteps: number; // sum of each participant's verified period average
+  totalSteps: number; // sum of each participant's verified weekly-average results in the selected period
   memberCount?: number;
   participantCount?: number;
   submittedWeeks?: number;

@@ -1,5 +1,5 @@
 /**
- * Thairath Step Up & Health Up — v2.5.2 Google Sheets Backend
+ * Thairath Step Up & Health Up — v2.5.6 Google Sheets Backend
  * Deploy as Web App: Execute as Me / Who has access: Anyone.
  */
 
@@ -75,7 +75,7 @@ const CAMPAIGN_WEEKS = [
 
 function doGet() {
   setup_();
-  return json_({ ok: true, data: { service: 'thairath-step-up-v2.5.2-backend', ready: true } });
+  return json_({ ok: true, data: { service: 'thairath-step-up-v2.5.6-backend', ready: true } });
 }
 
 function doPost(e) {
@@ -336,7 +336,7 @@ function syncWeeklyTarget_() {
   range.setValues(range.getValues().map(function() { return [CONFIG.WEEKLY_TARGET]; }));
 }
 
-// Run this public function once from Apps Script after deploying v2.5.2.
+// Run this public function once from Apps Script after deploying v2.5.6.
 // It fills only blank/UNASSIGNED BU cells and preserves manual overrides.
 function syncEmployeeBuIdsFromEmployeeId() {
   setup_();
@@ -1034,11 +1034,32 @@ function saveRankingSnapshot_(snapshot, adminContext) {
 }
 
 
-function leaderboardCacheKey_(currentMonth) { return 'leaderboard_v251_' + Number(currentMonth || 1); }
+function leaderboardCacheKey_(currentMonth) { return 'leaderboard_v256_' + Number(currentMonth || 1); }
 
 function invalidateLeaderboardCache_() {
   const cache = CacheService.getScriptCache();
   CAMPAIGN_WEEKS.forEach(function(item) { cache.remove(leaderboardCacheKey_(item.month)); });
+}
+
+function latestVerifiedLogsPerEmployeeWeek_(logs) {
+  const latestBySlot = {};
+  (logs || []).forEach(function(log, index) {
+    const employeeKey = canonicalEmployeeKey_(log.employeeId) || canonicalEmployeeKey_(log.userEmail);
+    if (!employeeKey) return;
+    const monthKey = Number(log.week) || 0;
+    const weekKey = Number(log.weekOfMonth) || 0;
+    const slotKey = weekKey > 0
+      ? employeeKey + '::' + monthKey + '::' + weekKey
+      : employeeKey + '::' + monthKey + '::' + String(log.id || index);
+    const timestampValue = log.updatedAt || log.reviewedAt || log.submittedAt || log.createdAt || '';
+    const timestamp = new Date(timestampValue).getTime();
+    const candidateTime = Number.isFinite(timestamp) ? timestamp : index;
+    const current = latestBySlot[slotKey];
+    if (!current || candidateTime >= current.timestamp) {
+      latestBySlot[slotKey] = { timestamp: candidateTime, log: log };
+    }
+  });
+  return Object.keys(latestBySlot).map(function(key) { return latestBySlot[key].log; });
 }
 
 function calculateLeaderboard_(currentMonth, forceRefresh) {
@@ -1067,8 +1088,15 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
     if (emailKey) usersByKey[emailKey] = user;
   });
 
+  const departmentLogIds = {};
+  latestVerifiedLogsPerEmployeeWeek_(logs).forEach(function(log, index) {
+    const key = normalizeId_(log.id) || ('department-log-' + index);
+    departmentLogIds[key] = true;
+  });
+
   // BU ranking stays average-based.
-  // Department ranking uses TOTAL_STEPS = sum of each employee's verified period average.
+  // Department ranking uses TOTAL_STEPS = sum of each employee's verified weekly-average results.
+  // One verified result per employee per campaign week is counted; if duplicates exist, the latest verified record wins.
   const buGroups = {};
   const departmentGroups = {};
 
@@ -1120,19 +1148,22 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
     if (!buGroups[rawBU].participantValues[employeeKey]) buGroups[rawBU].participantValues[employeeKey] = [];
     buGroups[rawBU].participantValues[employeeKey].push(steps);
 
-    const departmentGroup = resolveDepartmentGroup_(grouping, rawDepartment, rawBU, matchedUser ? (matchedUser.employeeId || matchedUser.email) : (log.employeeId || log.userEmail));
-    if (!departmentGroups[departmentGroup.key]) {
-      departmentGroups[departmentGroup.key] = {
-        id: departmentGroup.departmentId,
-        buId: departmentGroup.buId,
-        memberIds: {},
-        participantValues: {}
-      };
+    const departmentLogKey = normalizeId_(log.id);
+    if (departmentLogKey && departmentLogIds[departmentLogKey]) {
+      const departmentGroup = resolveDepartmentGroup_(grouping, rawDepartment, rawBU, matchedUser ? (matchedUser.employeeId || matchedUser.email) : (log.employeeId || log.userEmail));
+      if (!departmentGroups[departmentGroup.key]) {
+        departmentGroups[departmentGroup.key] = {
+          id: departmentGroup.departmentId,
+          buId: departmentGroup.buId,
+          memberIds: {},
+          participantValues: {}
+        };
+      }
+      if (!departmentGroups[departmentGroup.key].participantValues[employeeKey]) {
+        departmentGroups[departmentGroup.key].participantValues[employeeKey] = [];
+      }
+      departmentGroups[departmentGroup.key].participantValues[employeeKey].push(steps);
     }
-    if (!departmentGroups[departmentGroup.key].participantValues[employeeKey]) {
-      departmentGroups[departmentGroup.key].participantValues[employeeKey] = [];
-    }
-    departmentGroups[departmentGroup.key].participantValues[employeeKey].push(steps);
   });
 
   const businessUnits = Object.keys(buGroups).map(function(key) {
@@ -1160,23 +1191,26 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
 
   const departments = Object.keys(departmentGroups).map(function(key) {
     const group = departmentGroups[key];
-    const participantAverages = Object.keys(group.participantValues).map(function(employeeKey) {
-      return average_(group.participantValues[employeeKey]);
+    const participantTotals = Object.keys(group.participantValues).map(function(employeeKey) {
+      return sum_(group.participantValues[employeeKey]);
     }).filter(function(value) { return Number.isFinite(value) && value > 0; });
     const memberCount = Object.keys(group.memberIds).length;
-    const totalSteps = sum_(participantAverages);
+    const totalSteps = sum_(participantTotals);
+    const submittedWeekResults = Object.keys(group.participantValues).reduce(function(total, employeeKey) {
+      return total + group.participantValues[employeeKey].length;
+    }, 0);
     return {
       id: group.id,
       buId: group.buId,
       nameTh: group.id,
       nameEn: group.id,
-      participationRate: memberCount ? Math.round(participantAverages.length / memberCount * 100) : 0,
-      averageStepsPerPerson: average_(participantAverages),
+      participationRate: memberCount ? Math.round(participantTotals.length / memberCount * 100) : 0,
+      averageStepsPerPerson: average_(participantTotals),
       totalSteps: totalSteps,
       memberCount: memberCount,
-      participantCount: participantAverages.length,
+      participantCount: participantTotals.length,
       status: 'stable',
-      statusText: 'รวม ' + totalSteps.toLocaleString() + ' ก้าว จาก ' + participantAverages.length + ' คน'
+      statusText: 'รวม ' + totalSteps.toLocaleString() + ' ก้าว จาก ' + participantTotals.length + ' คน · ' + submittedWeekResults + ' ผลสัปดาห์'
     };
   }).sort(function(a, b) {
     if (b.totalSteps !== a.totalSteps) return b.totalSteps - a.totalSteps;

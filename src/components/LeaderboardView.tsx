@@ -67,7 +67,7 @@ export default function LeaderboardView({
       <section className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl md:text-2xl font-black text-black">Leaderboard Step Up</h2>
-          <p className="text-sm text-slate-500 mt-2">อันดับ BU ใช้ค่าเฉลี่ยต่อคน · อันดับฝ่ายใช้ก้าวรวมของทีม · ข้าม BU เฉพาะทีมที่ Admin กำหนด</p>
+          <p className="text-sm text-slate-500 mt-2">อันดับ BU ใช้ค่าเฉลี่ยต่อคน · อันดับฝ่ายรวมค่าก้าวเฉลี่ยรายสัปดาห์ของทุกคน · ข้าม BU เฉพาะทีมที่ Admin กำหนด</p>
         </div>
         <button onClick={onRefresh} disabled={isRefreshing} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 font-bold text-sm px-4 py-3 rounded-xl cursor-pointer">
           <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -98,7 +98,7 @@ export default function LeaderboardView({
       {currentRank > 0 && (
         <section className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#00914E] text-white flex items-center justify-center"><Trophy className="w-5 h-5" /></div>
-          <div><p className="text-sm font-black text-black">อันดับของคุณในมุมมองนี้: #{currentRank}</p><p className="text-sm text-slate-600 mt-1">{mode === 'department' ? 'ทุกคนที่ส่งผลและผ่านตรวจจะช่วยเพิ่มก้าวรวมของทีมโดยตรง' : 'ชวนทีมส่งผลอย่างสม่ำเสมอ เพื่อเพิ่มทั้งค่าเฉลี่ยและ Participation Rate'}</p></div>
+          <div><p className="text-sm font-black text-black">อันดับของคุณในมุมมองนี้: #{currentRank}</p><p className="text-sm text-slate-600 mt-1">{mode === 'department' ? 'ผลก้าวเฉลี่ยที่ผ่านตรวจของแต่ละสัปดาห์จะถูกบวกเข้าคะแนนรวมของทีมโดยตรง' : 'ชวนทีมส่งผลอย่างสม่ำเสมอ เพื่อเพิ่มทั้งค่าเฉลี่ยและ Participation Rate'}</p></div>
         </section>
       )}
 
