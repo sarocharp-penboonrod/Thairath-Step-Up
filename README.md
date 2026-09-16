@@ -1,8 +1,21 @@
-# Thairath Step Up & Health Up — v2.5.6
+# Thairath Step Up & Health Up — v2.5.7
 
 ระบบกิจกรรมสุขภาพสำหรับบันทึก **ค่าเฉลี่ยจำนวนก้าวต่อวันของแต่ละสัปดาห์** พร้อม Screenshot, Tesseract.js OCR, Google Drive Evidence, Approval Workflow, Multi-BU Dashboard และ Leaderboard
 
 
+
+
+## สิ่งที่ปรับใน v2.5.7
+
+- แก้ความต่างของยอด Ranking ระหว่าง Admin กับพนักงานที่เกิดจาก **ช่วงข้อมูลคนละ Scope** ไม่ใช่สูตรคนละสูตร
+- Leaderboard ฝั่งพนักงาน Default เป็น **ภาพรวมโครงการ** และเลือกดูรายเดือนได้ เพื่อเทียบกับ Admin Filter เดียวกันได้
+- เพิ่มข้อความบอกช่วงข้อมูลชัดเจนบนหน้า Leaderboard
+- เพิ่ม Flashcard **ก้าวสะสมที่ใช้จัดอันดับของคุณ** โดยรวมเฉพาะ AUTO_VERIFIED / APPROVED และใช้ 1 ผลล่าสุดต่อเดือน+สัปดาห์
+- เพิ่มจำนวนผลสัปดาห์ที่นำมาคิดและค่าเฉลี่ยต่อผลสัปดาห์
+- Backend `calculateLeaderboard` รองรับ `all` และรายเดือน พร้อม Cache แยกตามช่วงข้อมูล
+- Login bootstrap โหลด Leaderboard แบบภาพรวมโครงการให้ตรงกับ Default ฝั่งพนักงาน
+- ปรับ Label ค่าเฉลี่ยของฝ่ายเป็น **สะสมเฉลี่ย/ผู้เข้าร่วม** เพื่อลดความสับสน
+- ไม่เปลี่ยน Google Sheets schema, DepartmentMapping, EmployeeRankingOverride หรือสูตร Ranking v2.5.6
 
 ## สิ่งที่ปรับใน v2.5.6
 

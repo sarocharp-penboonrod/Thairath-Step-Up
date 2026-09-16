@@ -1,13 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Building2, RefreshCw, Search, Trophy, Users } from 'lucide-react';
-import { ActiveUser, BusinessUnitInfo, DepartmentInfo } from '../types';
-import { getCampaignMonth } from '../campaignConfig';
+import { Building2, Footprints, RefreshCw, Search, Trophy, Users } from 'lucide-react';
+import { ActiveUser, BusinessUnitInfo, DepartmentInfo, LeaderboardPeriod, StepLog } from '../types';
+import { CAMPAIGN_MONTHS, getCampaignMonth } from '../campaignConfig';
 
 interface LeaderboardViewProps {
   departments: DepartmentInfo[];
   businessUnits: BusinessUnitInfo[];
   activeUser: ActiveUser;
-  currentMonth: number;
+  stepLogs: StepLog[];
+  leaderboardPeriod: LeaderboardPeriod;
+  onLeaderboardPeriodChange: (period: LeaderboardPeriod) => void;
   lastRefreshedAt: string;
   isRefreshing: boolean;
   onRefresh: () => void;
@@ -29,11 +31,45 @@ function formatRefreshTime(value: string): string {
   });
 }
 
+function logTimestamp(log: StepLog): number {
+  const value = log.updatedAt || log.reviewedAt || log.submittedAt || log.createdAt || '';
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function personalRankingSummary(stepLogs: StepLog[], period: LeaderboardPeriod) {
+  const latestByWeek = new Map<string, StepLog>();
+  stepLogs
+    .filter((log) => log.verificationStatus === 'AUTO_VERIFIED' || log.verificationStatus === 'APPROVED')
+    .filter((log) => period === 'all' || Number(log.week) === Number(period))
+    .forEach((log) => {
+      const monthKey = Number(log.week) || 0;
+      const weekKey = Number(log.weekOfMonth) || 0;
+      const slotKey = weekKey > 0 ? `${monthKey}::${weekKey}` : `${monthKey}::${log.id}`;
+      const current = latestByWeek.get(slotKey);
+      if (!current || logTimestamp(log) >= logTimestamp(current)) latestByWeek.set(slotKey, log);
+    });
+
+  const countedLogs = Array.from(latestByWeek.values());
+  const totalSteps = countedLogs.reduce((sum, log) => sum + (Number(log.steps) || 0), 0);
+  return {
+    totalSteps,
+    submittedWeeks: countedLogs.length,
+    averagePerWeek: countedLogs.length ? Math.round(totalSteps / countedLogs.length) : 0
+  };
+}
+
+function periodLabel(period: LeaderboardPeriod): string {
+  return period === 'all' ? 'ภาพรวมโครงการ' : getCampaignMonth(period).label;
+}
+
 export default function LeaderboardView({
   departments,
   businessUnits,
   activeUser,
-  currentMonth,
+  stepLogs,
+  leaderboardPeriod,
+  onLeaderboardPeriodChange,
   lastRefreshedAt,
   isRefreshing,
   onRefresh
@@ -57,6 +93,11 @@ export default function LeaderboardView({
       .sort((a, b) => b.totalSteps - a.totalSteps || b.participationRate - a.participationRate);
   }, [departments, selectedBU, searchTerm]);
 
+  const personalSummary = useMemo(
+    () => personalRankingSummary(stepLogs, leaderboardPeriod),
+    [stepLogs, leaderboardPeriod]
+  );
+
   const rows = mode === 'bu' ? buRows : departmentRows;
   const currentRank = mode === 'bu'
     ? buRows.findIndex((item) => item.id === activeUser.buId) + 1
@@ -68,6 +109,7 @@ export default function LeaderboardView({
         <div>
           <h2 className="text-xl md:text-2xl font-black text-black">Leaderboard Step Up</h2>
           <p className="text-sm text-slate-500 mt-2">อันดับ BU ใช้ค่าเฉลี่ยต่อคน · อันดับฝ่ายรวมค่าก้าวเฉลี่ยรายสัปดาห์ของทุกคน · ข้าม BU เฉพาะทีมที่ Admin กำหนด</p>
+          <p className="text-xs font-bold text-[#00914E] mt-2">ช่วงข้อมูล: {periodLabel(leaderboardPeriod)}</p>
         </div>
         <button onClick={onRefresh} disabled={isRefreshing} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 font-bold text-sm px-4 py-3 rounded-xl cursor-pointer">
           <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -81,24 +123,55 @@ export default function LeaderboardView({
           <button onClick={() => setMode('department')} className={`px-4 py-2.5 rounded-xl text-sm font-black flex items-center gap-2 cursor-pointer ${mode === 'department' ? 'bg-black text-white' : 'bg-slate-100 text-slate-600'}`}><Users className="w-4 h-4" />อันดับรายฝ่าย</button>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-3">
-          {mode === 'department' && (
-            <select value={selectedBU} onChange={(event) => setSelectedBU(event.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold min-w-[220px]">
+        <div className="grid grid-cols-1 md:grid-cols-[220px_220px_1fr] gap-3">
+          <select
+            value={String(leaderboardPeriod)}
+            onChange={(event) => onLeaderboardPeriodChange(event.target.value === 'all' ? 'all' : Number(event.target.value))}
+            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold"
+            aria-label="เลือกช่วงข้อมูล Leaderboard"
+          >
+            <option value="all">ภาพรวมโครงการ</option>
+            {CAMPAIGN_MONTHS.map((month) => <option key={month.number} value={month.number}>{month.label}</option>)}
+          </select>
+
+          {mode === 'department' ? (
+            <select value={selectedBU} onChange={(event) => setSelectedBU(event.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold">
               <option value="all">ทุก BU</option>
               {businessUnits.map((bu) => <option key={bu.id} value={bu.id}>{bu.nameTh}</option>)}
             </select>
-          )}
-          <div className="relative flex-1">
+          ) : <div className="hidden md:block" />}
+
+          <div className="relative">
             <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder={mode === 'bu' ? 'ค้นหา BU' : 'ค้นหาฝ่าย'} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3 text-sm font-semibold outline-none focus:border-[#00914E]" />
           </div>
         </div>
       </section>
 
-      {currentRank > 0 && (
-        <section className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#00914E] text-white flex items-center justify-center"><Trophy className="w-5 h-5" /></div>
-          <div><p className="text-sm font-black text-black">อันดับของคุณในมุมมองนี้: #{currentRank}</p><p className="text-sm text-slate-600 mt-1">{mode === 'department' ? 'ผลก้าวเฉลี่ยที่ผ่านตรวจของแต่ละสัปดาห์จะถูกบวกเข้าคะแนนรวมของทีมโดยตรง' : 'ชวนทีมส่งผลอย่างสม่ำเสมอ เพื่อเพิ่มทั้งค่าเฉลี่ยและ Participation Rate'}</p></div>
+      {(currentRank > 0 || personalSummary.submittedWeeks > 0) && (
+        <section className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3">
+          <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#00914E] text-white flex items-center justify-center shrink-0"><Trophy className="w-5 h-5" /></div>
+            <div>
+              <p className="text-sm font-black text-black">อันดับของคุณในมุมมองนี้: {currentRank > 0 ? `#${currentRank}` : '-'}</p>
+              <p className="text-sm text-slate-600 mt-1">{mode === 'department' ? 'ผลก้าวเฉลี่ยที่ผ่านตรวจของแต่ละสัปดาห์จะถูกบวกเข้าคะแนนรวมของทีมโดยตรง' : 'ชวนทีมส่งผลอย่างสม่ำเสมอ เพื่อเพิ่มทั้งค่าเฉลี่ยและ Participation Rate'}</p>
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#00914E] flex items-center justify-center shrink-0"><Footprints className="w-5 h-5" /></div>
+            <div>
+              <p className="text-xs font-bold text-slate-500">ก้าวสะสมที่ใช้จัดอันดับของคุณ</p>
+              <p className="text-xl font-black text-[#00914E] mt-1">{personalSummary.totalSteps.toLocaleString()}</p>
+              <p className="text-xs text-slate-400 mt-1">เฉพาะผลสัปดาห์ที่ผ่านตรวจ</p>
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+            <p className="text-xs font-bold text-slate-500">ผลสัปดาห์ที่นำมาคิด</p>
+            <p className="text-xl font-black text-black mt-1">{personalSummary.submittedWeeks.toLocaleString()} ครั้ง</p>
+            <p className="text-xs text-slate-400 mt-1">เฉลี่ย {personalSummary.averagePerWeek.toLocaleString()} ก้าว/ผลสัปดาห์</p>
+          </div>
         </section>
       )}
 
@@ -129,7 +202,7 @@ export default function LeaderboardView({
                     <td className="p-4 text-right">
                       <p className="text-lg font-black text-[#00914E]">{(mode === 'department' ? (row as DepartmentInfo).totalSteps : row.averageStepsPerPerson).toLocaleString()}</p>
                       <p className="text-xs text-slate-400">{mode === 'department' ? 'ก้าวรวม' : 'ก้าว/วัน'}</p>
-                      {mode === 'department' && <p className="text-[10px] text-slate-400 mt-1">เฉลี่ย {row.averageStepsPerPerson.toLocaleString()}/คน</p>}
+                      {mode === 'department' && <p className="text-[10px] text-slate-400 mt-1">สะสมเฉลี่ย {row.averageStepsPerPerson.toLocaleString()}/ผู้เข้าร่วม</p>}
                     </td>
                     <td className="p-4 text-slate-500">{row.statusText || 'ข้อมูลจากระบบ'}</td>
                   </tr>
@@ -140,7 +213,7 @@ export default function LeaderboardView({
           </table>
         </div>
       </section>
-      <p className="text-xs text-slate-400 text-center">ข้อมูลเดือน{getCampaignMonth(currentMonth).label} · ข้อมูลล่าสุดจากระบบ</p>
+      <p className="text-xs text-slate-400 text-center">ข้อมูล {periodLabel(leaderboardPeriod)} · ใช้เกณฑ์เดียวกับ Ranking ฝั่ง Admin</p>
     </div>
   );
 }

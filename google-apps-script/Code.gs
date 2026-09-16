@@ -1,5 +1,5 @@
 /**
- * Thairath Step Up & Health Up — v2.5.6 Google Sheets Backend
+ * Thairath Step Up & Health Up — v2.5.7 Google Sheets Backend
  * Deploy as Web App: Execute as Me / Who has access: Anyone.
  */
 
@@ -75,7 +75,7 @@ const CAMPAIGN_WEEKS = [
 
 function doGet() {
   setup_();
-  return json_({ ok: true, data: { service: 'thairath-step-up-v2.5.6-backend', ready: true } });
+  return json_({ ok: true, data: { service: 'thairath-step-up-v2.5.7-backend', ready: true } });
 }
 
 function doPost(e) {
@@ -116,7 +116,7 @@ function doPost(e) {
         deleteUserLog_(body.logId, adminContext);
         return json_({ ok: true, data: { deleted: true } });
       case 'calculateLeaderboard':
-        return json_({ ok: true, data: calculateLeaderboard_(Number(body.currentMonth) || 1, Boolean(body.forceRefresh)) });
+        return json_({ ok: true, data: calculateLeaderboard_(body.currentMonth == null ? 'all' : body.currentMonth, Boolean(body.forceRefresh)) });
       case 'fetchDepartmentMapping':
         requireAdmin_(adminContext);
         return json_({ ok: true, data: fetchDepartmentMapping_() });
@@ -336,7 +336,7 @@ function syncWeeklyTarget_() {
   range.setValues(range.getValues().map(function() { return [CONFIG.WEEKLY_TARGET]; }));
 }
 
-// Run this public function once from Apps Script after deploying v2.5.6.
+// Run this public function once from Apps Script after deploying v2.5.7.
 // It fills only blank/UNASSIGNED BU cells and preserves manual overrides.
 function syncEmployeeBuIdsFromEmployeeId() {
   setup_();
@@ -521,7 +521,7 @@ function verifyLogin_(employeeId, password, currentMonth) {
     profile: profile,
     requiresSetup: !profile.nickname,
     logs: fetchUserLogs_(cleanId),
-    leaderboard: calculateLeaderboard_(currentMonth)
+    leaderboard: calculateLeaderboard_('all')
   };
 }
 
@@ -1034,11 +1034,24 @@ function saveRankingSnapshot_(snapshot, adminContext) {
 }
 
 
-function leaderboardCacheKey_(currentMonth) { return 'leaderboard_v256_' + Number(currentMonth || 1); }
+function normalizeLeaderboardPeriod_(value) {
+  const text = normalizeText_(value);
+  if (text === 'all' || text === '0') return 'all';
+  const month = Number(value);
+  return Number.isFinite(month) && month > 0 ? month : 'all';
+}
+
+function leaderboardCacheKey_(period) {
+  const normalized = normalizeLeaderboardPeriod_(period);
+  return 'leaderboard_v257_' + (normalized === 'all' ? 'all' : String(normalized));
+}
 
 function invalidateLeaderboardCache_() {
   const cache = CacheService.getScriptCache();
-  CAMPAIGN_WEEKS.forEach(function(item) { cache.remove(leaderboardCacheKey_(item.month)); });
+  cache.remove(leaderboardCacheKey_('all'));
+  const months = {};
+  CAMPAIGN_WEEKS.forEach(function(item) { months[item.month] = true; });
+  Object.keys(months).forEach(function(month) { cache.remove(leaderboardCacheKey_(Number(month))); });
 }
 
 function latestVerifiedLogsPerEmployeeWeek_(logs) {
@@ -1063,8 +1076,9 @@ function latestVerifiedLogsPerEmployeeWeek_(logs) {
 }
 
 function calculateLeaderboard_(currentMonth, forceRefresh) {
+  const period = normalizeLeaderboardPeriod_(currentMonth);
   const cache = CacheService.getScriptCache();
-  const cacheKey = leaderboardCacheKey_(currentMonth);
+  const cacheKey = leaderboardCacheKey_(period);
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
     if (cached) {
@@ -1076,7 +1090,7 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
     return normalizeText_(user.status || 'Active') === 'active';
   });
   const logs = fetchAllStepLogs_().filter(function(log) {
-    return Number(log.week) === Number(currentMonth) && isVerifiedStatus_(log.verificationStatus);
+    return isVerifiedStatus_(log.verificationStatus) && (period === 'all' || Number(log.week) === Number(period));
   });
 
   const grouping = buildDepartmentGrouping_(users);
@@ -1222,6 +1236,7 @@ function calculateLeaderboard_(currentMonth, forceRefresh) {
     businessUnits: businessUnits,
     departments: departments,
     generatedAt: now_(),
+    periodKey: period === 'all' ? 'all' : String(period),
     verifiedLogCount: logs.length
   };
   try { cache.put(cacheKey, JSON.stringify(result), 300); } catch (err) { console.warn('Leaderboard cache skipped: ' + err); }

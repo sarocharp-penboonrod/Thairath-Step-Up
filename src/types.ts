@@ -1,4 +1,5 @@
 export type VerificationStatus = 'AUTO_VERIFIED' | 'NEEDS_REVIEW' | 'APPROVED' | 'REJECTED';
+export type LeaderboardPeriod = number | 'all';
 
 export interface StepLog {
   id: string;
@@ -70,6 +71,7 @@ export interface LeaderboardData {
   departments: DepartmentInfo[];
   businessUnits: BusinessUnitInfo[];
   generatedAt: string;
+  periodKey?: string;
 }
 
 export interface DepartmentMappingRule {

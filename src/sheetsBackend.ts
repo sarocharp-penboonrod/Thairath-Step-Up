@@ -6,6 +6,7 @@ import {
   VerificationStatus,
   EmployeeLoginResult,
   LeaderboardData,
+  LeaderboardPeriod,
   AdminSession,
   DepartmentMappingRule,
   EmployeeRankingOverride,
@@ -71,7 +72,8 @@ function normalizeLeaderboard(data?: LeaderboardData | null): LeaderboardData {
       totalSteps: Number(department.totalSteps) || Number(department.averageStepsPerPerson) || 0
     })),
     businessUnits: data?.businessUnits || [],
-    generatedAt: data?.generatedAt || new Date().toISOString()
+    generatedAt: data?.generatedAt || new Date().toISOString(),
+    periodKey: data?.periodKey
   };
 }
 
@@ -168,9 +170,9 @@ export async function deleteUserLog(logId: string) {
   await sheetsRequest<{ deleted: boolean }>('deleteUserLog', { logId });
 }
 
-export async function calculateSheetsLeaderboard(currentMonth: number, forceRefresh = false): Promise<LeaderboardData> {
+export async function calculateSheetsLeaderboard(period: LeaderboardPeriod, forceRefresh = false): Promise<LeaderboardData> {
   try {
-    const leaderboard = await sheetsRequest<LeaderboardData>('calculateLeaderboard', { currentMonth, forceRefresh });
+    const leaderboard = await sheetsRequest<LeaderboardData>('calculateLeaderboard', { currentMonth: period, forceRefresh });
     return normalizeLeaderboard(leaderboard);
   } catch (err) {
     console.error('Error fetching leaderboard data:', err);

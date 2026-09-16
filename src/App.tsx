@@ -6,7 +6,8 @@ import {
   DepartmentInfo,
   BusinessUnitInfo,
   NewStepLogInput,
-  EmployeeLoginResult
+  EmployeeLoginResult,
+  LeaderboardPeriod
 } from './types';
 import Header from './components/Header';
 import DashboardView from './components/DashboardView';
@@ -46,6 +47,7 @@ export default function App() {
   const [isAdminMode, setIsAdminMode] = useState(() => localStorage.getItem('thairath_is_admin_mode') === 'true');
   const [dbSyncing, setDbSyncing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState('');
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState<LeaderboardPeriod>('all');
   const skipNextAutoLoad = useRef(false);
 
   useEffect(() => { void seedInitialDataIfNecessary(); }, []);
@@ -67,7 +69,7 @@ export default function App() {
       const [logs, profile, leaderboard] = await Promise.all([
         fetchUserLogs(activeUser.employeeId || activeUser.email),
         getUserProfile(activeUser.employeeId || activeUser.email),
-        calculateSheetsLeaderboard(currentMonth)
+        calculateSheetsLeaderboard(leaderboardPeriod)
       ]);
       setStepLogs(logs);
       if (profile) setActiveUser(profile);
@@ -85,12 +87,12 @@ export default function App() {
       return;
     }
     void loadDatabaseData();
-  }, [isLoggedIn, isAdminMode, activeUser?.email, currentMonth]);
+  }, [isLoggedIn, isAdminMode, activeUser?.email, currentMonth, leaderboardPeriod]);
 
   const refreshLeaderboard = async () => {
     setDbSyncing(true);
     try {
-      applyLeaderboard(await calculateSheetsLeaderboard(currentMonth, true));
+      applyLeaderboard(await calculateSheetsLeaderboard(leaderboardPeriod, true));
     } finally {
       setDbSyncing(false);
     }
@@ -120,7 +122,7 @@ export default function App() {
       setStepLogs((previous) => [saved, ...previous]);
       const [profile, leaderboard] = await Promise.all([
         getUserProfile(activeUser.employeeId || activeUser.email),
-        calculateSheetsLeaderboard(currentMonth)
+        calculateSheetsLeaderboard(leaderboardPeriod)
       ]);
       if (profile) setActiveUser(profile);
       applyLeaderboard(leaderboard);
@@ -197,7 +199,9 @@ export default function App() {
             departments={departments}
             businessUnits={businessUnits}
             activeUser={activeUser}
-            currentMonth={currentMonth}
+            stepLogs={stepLogs}
+            leaderboardPeriod={leaderboardPeriod}
+            onLeaderboardPeriodChange={setLeaderboardPeriod}
             lastRefreshedAt={lastRefreshedAt}
             isRefreshing={dbSyncing}
             onRefresh={() => void refreshLeaderboard()}
