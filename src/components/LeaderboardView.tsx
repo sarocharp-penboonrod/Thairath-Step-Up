@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Building2, Footprints, RefreshCw, Search, Trophy, Users } from 'lucide-react';
 import { ActiveUser, BusinessUnitInfo, DepartmentInfo, LeaderboardPeriod, StepLog } from '../types';
 import { CAMPAIGN_MONTHS, getCampaignMonth } from '../campaignConfig';
+import { calculatePersonalRankingSummary } from '../rankingSteps';
 
 interface LeaderboardViewProps {
   departments: DepartmentInfo[];
@@ -29,34 +30,6 @@ function formatRefreshTime(value: string): string {
     minute: '2-digit',
     hour12: false
   });
-}
-
-function logTimestamp(log: StepLog): number {
-  const value = log.updatedAt || log.reviewedAt || log.submittedAt || log.createdAt || '';
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function personalRankingSummary(stepLogs: StepLog[], period: LeaderboardPeriod) {
-  const latestByWeek = new Map<string, StepLog>();
-  stepLogs
-    .filter((log) => log.verificationStatus === 'AUTO_VERIFIED' || log.verificationStatus === 'APPROVED')
-    .filter((log) => period === 'all' || Number(log.week) === Number(period))
-    .forEach((log) => {
-      const monthKey = Number(log.week) || 0;
-      const weekKey = Number(log.weekOfMonth) || 0;
-      const slotKey = weekKey > 0 ? `${monthKey}::${weekKey}` : `${monthKey}::${log.id}`;
-      const current = latestByWeek.get(slotKey);
-      if (!current || logTimestamp(log) >= logTimestamp(current)) latestByWeek.set(slotKey, log);
-    });
-
-  const countedLogs = Array.from(latestByWeek.values());
-  const totalSteps = countedLogs.reduce((sum, log) => sum + (Number(log.steps) || 0), 0);
-  return {
-    totalSteps,
-    submittedWeeks: countedLogs.length,
-    averagePerWeek: countedLogs.length ? Math.round(totalSteps / countedLogs.length) : 0
-  };
 }
 
 function periodLabel(period: LeaderboardPeriod): string {
@@ -94,7 +67,7 @@ export default function LeaderboardView({
   }, [departments, selectedBU, searchTerm]);
 
   const personalSummary = useMemo(
-    () => personalRankingSummary(stepLogs, leaderboardPeriod),
+    () => calculatePersonalRankingSummary(stepLogs, leaderboardPeriod),
     [stepLogs, leaderboardPeriod]
   );
 

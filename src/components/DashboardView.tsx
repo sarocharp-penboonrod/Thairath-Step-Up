@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { ActiveUser, StepLog, WeekConfig, isVerifiedStatus } from '../types';
 import { CAMPAIGN_MONTHS, CAMPAIGN_WEEKLY_TARGET, getCampaignMonth } from '../campaignConfig';
+import { calculatePersonalRankingSummary, getLatestVerifiedWeeklyLogs } from '../rankingSteps';
 
 interface DashboardViewProps {
   activeUser: ActiveUser;
@@ -98,17 +99,40 @@ export default function DashboardView({
     [stepLogs, currentWeek]
   );
   const selectedVerified = useMemo(
-    () => selectedAll.filter((log) => isVerifiedStatus(log.verificationStatus)),
-    [selectedAll]
+    () => getLatestVerifiedWeeklyLogs(stepLogs, currentWeek),
+    [stepLogs, currentWeek]
+  );
+  const allVerifiedWeekly = useMemo(
+    () => getLatestVerifiedWeeklyLogs(stepLogs, 'all'),
+    [stepLogs]
   );
   const cumulativeVerified = useMemo(
-    () => stepLogs.filter((log) => Number(log.week) <= currentWeek && isVerifiedStatus(log.verificationStatus)),
-    [stepLogs, currentWeek]
+    () => allVerifiedWeekly.filter((log) => Number(log.week) <= currentWeek),
+    [allVerifiedWeekly, currentWeek]
   );
   const previousMonthVerified = useMemo(
-    () => stepLogs.filter((log) => Number(log.week) === currentWeek - 1 && isVerifiedStatus(log.verificationStatus)),
+    () => allVerifiedWeekly.filter((log) => Number(log.week) === currentWeek - 1),
+    [allVerifiedWeekly, currentWeek]
+  );
+
+  const selectedRankingSummary = useMemo(
+    () => calculatePersonalRankingSummary(stepLogs, currentWeek),
     [stepLogs, currentWeek]
   );
+  const projectRankingSummary = useMemo(
+    () => calculatePersonalRankingSummary(stepLogs, 'all'),
+    [stepLogs]
+  );
+  const monthlyRankingBreakdown = useMemo(() => {
+    const latestMonthWithData = stepLogs.reduce((max, log) => Math.max(max, Number(log.week) || 0), 0);
+    const visibleThroughMonth = Math.max(currentWeek, latestMonthWithData);
+    return CAMPAIGN_MONTHS
+      .filter((month) => month.number <= visibleThroughMonth)
+      .map((month) => ({
+        ...month,
+        summary: calculatePersonalRankingSummary(stepLogs, month.number)
+      }));
+  }, [stepLogs, currentWeek]);
 
   const submittedWeeks = uniqueWeekCount(selectedAll);
   const verifiedWeeks = uniqueWeekCount(selectedVerified);
@@ -196,8 +220,8 @@ export default function DashboardView({
       <section className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <p className="text-sm font-bold text-[#00914E]">สวัสดี {activeUser.nickname || activeUser.name}</p>
-          <h1 className="text-2xl md:text-3xl font-black text-black mt-1">ภาพรวมค่าเฉลี่ยก้าว</h1>
-          <p className="text-sm text-slate-500 mt-2">เป้าหมายคือค่าเฉลี่ยอย่างน้อย 7,000 ก้าวต่อวันในแต่ละสัปดาห์</p>
+          <h1 className="text-2xl md:text-3xl font-black text-black mt-1">Dashboard Step Up ของคุณ</h1>
+          <p className="text-sm text-slate-500 mt-2">ติดตามทั้งค่าเฉลี่ยรายสัปดาห์และคะแนนก้าวสะสมที่ใช้จัดอันดับ</p>
         </div>
         <select
           value={currentWeek}
@@ -207,6 +231,51 @@ export default function DashboardView({
           {CAMPAIGN_MONTHS.map((month) => <option key={month.number} value={month.number}>{month.label}</option>)}
         </select>
       </section>
+
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <article className="bg-white rounded-2xl border border-slate-200 p-5 md:p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-black text-slate-600">คะแนนก้าวสะสมเดือน{selectedMonth.label}</p>
+              <p className="text-3xl md:text-4xl font-black text-[#00914E] mt-2">{selectedRankingSummary.totalSteps.toLocaleString()}</p>
+              <p className="text-xs text-slate-400 mt-1">คะแนนก้าวสะสม</p>
+            </div>
+            <div className="w-11 h-11 rounded-xl bg-emerald-50 text-[#00914E] flex items-center justify-center shrink-0"><Footprints className="w-5 h-5" /></div>
+          </div>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+              <p className="text-xs text-slate-500 font-bold">ผลสัปดาห์ที่นำมาคิด</p>
+              <p className="text-lg font-black text-black mt-1">{selectedRankingSummary.submittedWeeks} ครั้ง</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+              <p className="text-xs text-slate-500 font-bold">เฉลี่ยต่อผลสัปดาห์</p>
+              <p className="text-lg font-black text-black mt-1">{selectedRankingSummary.averagePerWeek.toLocaleString()} <span className="text-xs text-slate-400">ก้าว</span></p>
+            </div>
+          </div>
+        </article>
+
+        <article className="bg-white rounded-2xl border border-emerald-100 p-5 md:p-6 shadow-sm relative overflow-hidden">
+          <div className="absolute -right-10 -top-10 w-36 h-36 rounded-full bg-emerald-50" aria-hidden="true" />
+          <div className="relative flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-black text-slate-600">คะแนนก้าวสะสมทั้งโครงการ</p>
+              <p className="text-3xl md:text-4xl font-black text-black mt-2">{projectRankingSummary.totalSteps.toLocaleString()}</p>
+              <p className="text-xs text-slate-400 mt-1">{projectRankingSummary.submittedWeeks} ผลสัปดาห์ที่ผ่านตรวจ</p>
+            </div>
+            <div className="w-11 h-11 rounded-xl bg-[#00914E] text-white flex items-center justify-center shrink-0"><Award className="w-5 h-5" /></div>
+          </div>
+          <div className="relative mt-5 grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {monthlyRankingBreakdown.map((month) => (
+              <div key={month.number} className={`rounded-xl border p-3 ${month.number === currentWeek ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100 bg-slate-50'}`}>
+                <p className="text-[11px] font-bold text-slate-500">{month.shortLabel}</p>
+                <p className="text-sm font-black text-black mt-1">{month.summary.totalSteps.toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+
+      <p className="-mt-2 text-xs text-slate-400 leading-relaxed">คะแนนก้าวสะสม = ผลรวมค่าก้าวเฉลี่ย/วันของแต่ละสัปดาห์ที่ผ่านตรวจ โดยใช้ผลล่าสุด 1 รายการต่อสัปดาห์ เป็นคะแนนที่ใช้ใน Ranking ไม่ใช่จำนวนก้าวจริงที่เดินรวมทั้งเดือน</p>
 
       <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         {summaryCards.map((card) => (

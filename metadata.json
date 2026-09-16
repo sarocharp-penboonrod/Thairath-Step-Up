@@ -1,6 +1,6 @@
 {
   "name": "Thairath Step Up & Health Up",
-  "version": "2.5.7",
+  "version": "2.5.8",
   "description": "Employee wellness dashboard, weekly step submission portal, department leaderboard, and admin reporting center for Thairath Logistics.",
   "requestFramePermissions": [],
   "majorCapabilities": [
@@ -18,6 +18,8 @@
     "DEPARTMENT_PARTICIPATION_RANKING",
     "WEEKLY_SUM_DEPARTMENT_RANKING",
     "EMPLOYEE_LEADERBOARD_PERIOD_FILTER",
-    "PERSONAL_RANKING_TOTAL"
+    "PERSONAL_RANKING_TOTAL",
+    "EMPLOYEE_DASHBOARD_RANKING_SUMMARY",
+    "SHARED_PERSONAL_RANKING_MATH"
   ]
 }
